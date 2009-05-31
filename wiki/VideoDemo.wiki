@@ -1,1 +1,1 @@
-<wiki:video url="hhttp://www.youtube.com/watch?v=aYWe4_zcY-I"/>
+<wiki:video url="http://www.youtube.com/watch?v=aYWe4_zcY-I"/>

@@ -1,0 +1,18 @@
+There are few simple hints that you can consider if the program does work.
+
+
+* First of all, download the latest archive (beta-0.2) that you can find in the Downloads page. If you are one of those 3 unfortunate souls that have initially downloaded the archive, chances are, you've got the wrong archive. Changes have been made after that.
+
+* Make sure the card's driver is properly loaded
+
+* You do not need to put the card in monitor mode. The program does this for you.
+
+* Upon starting the program, it should show the inject interface and monitor interface plus the mac address
+   Ex. MODE: crack         (using: wlan0/mon0 === 00:c0:ca:1a:0e:41)
+
+* If for some out of this world reason, the card showing instead of the above are both the same, (wlan0/wlan0) and when you looked at "airmon-ng start wlan0" it says that "(monitor mode enabled on mon0)", you can just specify your $inject_iface and $monitor_iface inside the script.
+
+* Having a different monitor interface is due to the possibility that the in-built kernel driver was used, aka mac80211. 
+  Some wireless card drivers doesn't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
+
+* Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz must have slipped accidentally..

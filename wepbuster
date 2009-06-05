@@ -180,7 +180,7 @@ $ENV{'inject_iface'} = $inject_iface;
 	open IFCONFIG, "ifconfig $inject_iface |" or die $!;
 	while (<IFCONFIG>){
 	  next unless /HWaddr/;
-	  $macaddress = (split /\s+/,$_)[-1];
+	  $macaddress = (split /\s+/,$_)[-1] unless defined $macaddress;
 	}
 
 

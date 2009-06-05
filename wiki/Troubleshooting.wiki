@@ -15,4 +15,4 @@ There are few simple hints that you can consider if the program does work.
   * Having a different monitor interface is due to the possibility that the in-built kernel driver was used, aka mac80211. 
   Some wireless card drivers don't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
 
-  * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz must have slipped accidentally..
+  * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz could slip from time to time..

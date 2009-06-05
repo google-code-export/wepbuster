@@ -18,7 +18,7 @@ There are few simple hints that you may consider if the program does not work fo
 
   * Did you change your aircrack-ng sources and recompile as according to the instructions?
 
-  * What do you see when you do a "ps ax |grep perl && ps ax |grep air" while running the program? Did you verify that you can run all those commands manually? somebody said "airodump-ng -n" does not work in BT4. This is the very first aircrack-ng command run by wepbuster
+  * What do you see when you do a "ps ax |grep perl && ps ax |grep air" while running the program? Did you verify that you can run all those commands manually? someone has reported that "airodump-ng -n" does not work in BT4. This is the very first aircrack-ng command run by wepbuster
 
   * Don't use a live CD yet. Use a linux installation (it can be inside vmware but is better otherwise so you won't think the program runs slow) and then modify the aircrack-ng sources as mentioned in the front page. 
 

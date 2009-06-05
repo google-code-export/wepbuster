@@ -1,4 +1,4 @@
-There are few simple hints that you can consider if the program does not work for you.
+There are few simple hints that you may consider if the program does not work for you.
 
 
   * First of all, download the latest archive (beta-0.2) that you can find in the Downloads page. If you are one of those 3 unfortunate souls that have initially downloaded the archive, chances are, you've got the wrong archive. Changes have been made shortly after that.

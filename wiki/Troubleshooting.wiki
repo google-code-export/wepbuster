@@ -12,9 +12,16 @@ There are few simple hints that you may consider if the program does not work fo
 
   * If for some out of this world reason, the card showing instead of the above are both the same, (wlan0/wlan0) and when you looked at "airmon-ng start wlan0" it says that "(monitor mode enabled on mon0)", you can just specify your $inject_iface and $monitor_iface as well as the $macaddress inside the script. This will save you from a lot of trouble.
 
-  * Having a different monitor interface is due to the possibility that the in-built kernel driver was used, aka mac80211. 
-  Some wireless card drivers don't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
+  * Having a different monitor interface is due to the possibility that the in-built kernel driver was used, aka mac80211.  Some wireless card drivers don't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
+
+  * If you have set the interfaces manually and the program still did not find any AP, are you inside a writable directory? Did you manually run airodump using the $monitor_iface (with -t wep) and still there are WEP APs around? 
+
+  * Did you change your aircrack-ng sources and recompile as according to the instructions
+
+  * What do you see when you do a "ps ax |grep perl && ps ax |grep air" while running the program?
+
+  * Don't use a live CD yet. Use a linux installation (it can be inside vmware but is better otherwise so you won't think the program runs slow) and then modify the aircrack-ng sources as mentioned in the front page. 
 
   * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz could slip from time to time..
 
-  * Finally, don't use a live CD yet. Use a linux installation (it can be inside vmware but is better otherwise so you won't think the program runs slow) and then modify the aircrack-ng sources as mentioned in the front page. 
+  * Create a new issue when all else fails

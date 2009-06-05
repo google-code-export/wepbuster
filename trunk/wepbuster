@@ -29,15 +29,31 @@ use subs qw(clean connect pingtest select_iface);
 
 
 
-# Time to wait before reading the airodump output. 23 seconds/sleeps should be safe on default aircrack-ng installation which updates ]
-# .csv files every 20 seconds;
-my $airodumpwait = 4;
+##########   INTERFACE CONFIGURATION   ##################
+
+# Injection interface to use (ath0, wlan0, rausb0)
+my $inject_iface = '';
+
+# Monitor interface to use (e.g, rtap0, mon0)
+my $monitor_iface = '';
+
+# Mac Address of your injecting interface
+my $macaddress = '';
+
+
+######  TIMEOUTS  AND DURATION   #################
 
 # Initial airodump scan duration (sleeps) when trying to build target AP list
 my $scan_duration = 6;
 
 # Minimum number of IVs collected when we want cracking to begin (20k for 40-bit, 40k for 128-bit)
 my $min_iv = 17000;
+
+# Time to wait before reading the airodump output. 23 seconds/sleeps should be safe on default aircrack-ng installation which updates ]
+# .csv files every 20 seconds;
+my $airodumpwait = 4;
+
+
 
 
 
@@ -53,18 +69,8 @@ my $ska_timeout = 15;
 # Scan duration when "sorting" or "connecting". 
 my $sortcon_duration = 4;
 
-# Injection interface to use (ath0, wlan0, rausb0)
-my $inject_iface = '';
-
-# Monitor interface to use (e.g, rtap0, mon0)
-my $monitor_iface = '';
-
 # Interface selection timeout, in case multiple interfaces were found.
 my $select_timeout = 3;
-
-####################################################################################
-
-
 
 # After 20 sleeps if IV is less than 100, send deauth broadcast ($ivtimer / 10 )
 my $deauth_timeout = 2;
@@ -75,11 +81,15 @@ my $arpreplay_timeout = 4;
 # After 60 sleeps if IV is less than 100, stop injecting and move to the next AP ($ivtimer / 10)
 my $inject_timeout = 6;
 
+####################################################################################
+
+
+
+
 
 my @channels; 
 my $mode;
 my $pinghost;
-my $macaddress;
 my %uniq_channels;
 my %all_ap;
 my %owned_ap;
@@ -173,7 +183,7 @@ $ENV{'inject_iface'} = $inject_iface;
 
 # Get the mac address
 
-unless (defined $macaddress){
+unless (defined $macaddress && $macaddress ne ''){
 
 	unless ($inject_iface ne $monitor_iface){
    	  system "iwconfig $inject_iface mode managed";

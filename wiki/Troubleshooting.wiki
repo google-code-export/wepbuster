@@ -5,6 +5,8 @@ There are few simple hints that you may consider if the program does not work fo
 
   * Make sure the card's driver is properly loaded
 
+  * Make sure no old processes of aircrack-ng and wepbuster are running (pkill -9 air && pkill -9 perl)
+
   * You do not need to put the card in monitor mode. The program does this for you.
 
   * Upon starting the program, it should show the inject interface and monitor interface plus the mac address

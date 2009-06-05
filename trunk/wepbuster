@@ -37,7 +37,7 @@ my $airodumpwait = 4;
 my $scan_duration = 6;
 
 # Minimum number of IVs collected when we want cracking to begin (20k for 40-bit, 40k for 128-bit)
-my $min_iv = 15000;
+my $min_iv = 17000;
 
 
 
@@ -54,10 +54,10 @@ my $ska_timeout = 15;
 my $sortcon_duration = 4;
 
 # Injection interface to use (ath0, wlan0, rausb0)
-my $inject_iface = 'wlan0';
+my $inject_iface = '';
 
 # Monitor interface to use (e.g, rtap0, mon0)
-my $monitor_iface = 'wlan0';
+my $monitor_iface = '';
 
 # Interface selection timeout, in case multiple interfaces were found.
 my $select_timeout = 3;
@@ -103,13 +103,6 @@ our $set_monitor_error;
 #   Detect all wireless card and monitor interface if there's any through the output of airmon-ng
 #   Store all cards in %wifi_iface (key = inject interface, value = monitor interface)
 #   If the cards were manually set at the beginning of this script, then don't auto detect;
-# airmon-ng start iface
-# builtin with tap interface 
-# wlan0           intel 3945           iwl3945 - [phy0]
-# wlan0 	 ipw3945ABG         iwl3945 -[phy0]
-#  mon0		 ipw3945ABG	    iwl3945 -[phy0]
-# standalone without tap interface
-# wlan0		RTL8187		r8187 (monitor mode enabled)
 
 
 my %wifi_iface;
@@ -1294,6 +1287,8 @@ sub clean{
 
 
 
+##################    BEGIN  SUB  SET_IFACE    #################################
+
 sub set_iface{
 
 my $start_iface = 0;
@@ -1316,7 +1311,6 @@ while (<AIRMONSTART>){
   if ($start_mon_iface == 1){
       $monitor_iface = (split/\s+/,$_)[-1];
       $monitor_iface =~ tr/a-z0-9//cd unless !defined $monitor_iface;
-	print "MONITOR\n $monitor_iface" if defined $monitor_iface;
       if (defined $monitor_iface && $monitor_iface ne ''){
          return $monitor_iface;
       }else{
@@ -1347,6 +1341,13 @@ while (<AIRMONSTART>){
 
 } 
 
+##################    END  SUB  SET_IFACE    #################################
+
+
+
+
+##################   BEGIN  SUB  SELECT_IFACE   ###############################
+
 sub select_iface{
 
 my $timeout = time + shift;
@@ -1358,3 +1359,4 @@ return $answer if defined $answer;
 }
 
 }
+##################   END  SUB  SELECT_IFACE   ###############################

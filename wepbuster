@@ -174,8 +174,9 @@ $ENV{'inject_iface'} = $inject_iface;
 
 
 # Get the mac address
-
-   	system "iwconfig $inject_iface mode managed";
+	unless $inject_iface ne $monitor_iface{
+   	  system "iwconfig $inject_iface mode managed";
+	}
 	open IFCONFIG, "ifconfig $inject_iface |" or die $!;
 	while (<IFCONFIG>){
 	  next unless /HWaddr/;

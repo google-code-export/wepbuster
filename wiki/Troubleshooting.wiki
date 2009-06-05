@@ -13,6 +13,6 @@ There are few simple hints that you can consider if the program does work.
   * If for some out of this world reason, the card showing instead of the above are both the same, (wlan0/wlan0) and when you looked at "airmon-ng start wlan0" it says that "(monitor mode enabled on mon0)", you can just specify your $inject_iface and $monitor_iface inside the script.
 
   * Having a different monitor interface is due to the possibility that the in-built kernel driver was used, aka mac80211. 
-  Some wireless card drivers doesn't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
+  Some wireless card drivers don't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
 
   * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz must have slipped accidentally..

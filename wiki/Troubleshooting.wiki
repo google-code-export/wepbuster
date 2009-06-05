@@ -24,4 +24,4 @@ There are few simple hints that you may consider if the program does not work fo
 
   * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz could slip from time to time..
 
-  * Create a new issue when all else fails and answer the annoying questions I have prepared for you
+  * Create a new issue when all else fails and answer those annoying questions I have prepared for you

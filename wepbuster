@@ -1217,7 +1217,7 @@ system("stty", "sane");
 
 
 my $basestation;
-open CSV, $csv or die $!;
+open CSV, $csv or die "Cannot open airodump output.\n";
 while (<CSV>){
 chomp;
 next if /^\r$/;

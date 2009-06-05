@@ -16,3 +16,5 @@ There are few simple hints that you may consider if the program does not work fo
   Some wireless card drivers don't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
 
   * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz could slip from time to time..
+
+  * Finally, don't use a live CD yet. Use a linux installation (it can be inside vmware but is better otherwise so you won't think the program runs slow) and modify the aircrack-ng sources mentioned in the home page. 

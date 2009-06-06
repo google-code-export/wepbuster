@@ -120,6 +120,7 @@ my $iface_index = 1;
 
 unless ($inject_iface ne '' && $monitor_iface ne ''){
 print "\nDetecting wireless interfaces...\n";
+my $autodetect_iface = 1;
 open AIRMON, "airmon-ng |" or die $!;
 while (<AIRMON>){
   next unless /^[a-z]+\d\s/;
@@ -137,6 +138,9 @@ print "\n---------------------------------------------------\n";
      $wifi_iface{$iface_index} = { monitor => $monitor_iface,
 				   inject => $inject_iface
 				   }; 
+     $wifi_iface{$iface_index}{'inject'} = $monitor_iface  if ($inject_iface =~ /wifi/);
+	
+
      print "monitor interface --> $wifi_iface{$iface_index}{'monitor'}\n";
      $inject_iface = $wifi_iface{$iface_index}{'inject'};
      $monitor_iface = $wifi_iface{$iface_index}{'monitor'};
@@ -190,8 +194,13 @@ unless (defined $macaddress && $macaddress ne ''){
 	}
 	open IFCONFIG, "ifconfig $inject_iface |" or die $!;
 	while (<IFCONFIG>){
-	  next unless /HWaddr/;
+	  next unless /HW/;
 	  $macaddress = (split /\s+/,$_)[-1];
+	  if ($macaddress =~ /-/){
+		my @uglymac = (split /-/, $macaddress);
+		$macaddress = "@uglymac[0..5]";
+		$macaddress =~ s/ /:/g;
+	  }
 	}
 }
 
@@ -1307,9 +1316,12 @@ my $start_iface = 0;
 my $start_mon_iface = 0;
 my $inject_iface = shift;
 my $monitor_error;
+my $atheros = 0;
+my $mac80211 = 0;
 
 
 open AIRMONSTART, "airmon-ng start $inject_iface |" or die $!;
+
 while (<AIRMONSTART>){
   if ($monitor_error){
 	next unless /ERROR/;
@@ -1320,9 +1332,18 @@ while (<AIRMONSTART>){
         $start_iface = 1;
      }  
 
-  if ($start_mon_iface == 1){
-      $monitor_iface = (split/\s+/,$_)[-1];
-      $monitor_iface =~ tr/a-z0-9//cd unless !defined $monitor_iface;
+  if ($start_mon_iface){
+		
+      if ($mac80211){
+         $monitor_iface = (split/\s+/,$_)[-1];
+         $monitor_iface =~ tr/a-z0-9//cd unless !defined $monitor_iface;
+      }
+
+      if ($atheros){
+         $monitor_iface = (split/\s+/,$_)[0];
+      }
+
+
       if (defined $monitor_iface && $monitor_iface ne ''){
          return $monitor_iface;
       }else{
@@ -1336,8 +1357,13 @@ while (<AIRMONSTART>){
   if ($start_iface){
       if (/\[/){
      	  $start_mon_iface = 1;
+	  $mac80211 = 1;
 	  next;
-       }else{
+       }elsif(/^wifi\d/){
+	 $start_mon_iface = 1;
+	 $atheros = 1;	
+	 next;
+	}else{
 	  return $inject_iface;
        }
 

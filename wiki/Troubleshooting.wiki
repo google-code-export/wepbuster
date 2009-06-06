@@ -16,7 +16,7 @@ There are several hints that you may consider if the program does not work for y
  
   * If you have set the interfaces manually and the program still did not find any AP, are you inside a writable directory? Did you manually run airodump-ng using the $monitor_iface (with -t wep -n-w) and still there are WEP APs around and airodump-ng was able to write the csv file within that $scan_duration? 
 
-  * Did you change your aircrack-ng sources and recompile as according to the instructions? If using my pre-compiled aircrack-ng and airodump-ng, make sure wepbuster is executing them and not the unmodified versions. Otherwise, you might see the error: "Cannot open airodump output". Change $airodumpwait and $scan_duration accordingly if using an unmodified aircrack-ng and airodump-ng. 
+  * Did you change your aircrack-ng sources and recompile as according to the instructions? If using my pre-compiled aircrack-ng and airodump-ng, make sure wepbuster is executing them and not the unmodified versions. Otherwise, you might see the error: _*"Cannot open airodump output"*_. Change $airodumpwait and $scan_duration accordingly if using an unmodified aircrack-ng and airodump-ng. 
 
   * What do you see when you do a "ps ax |grep perl && ps ax |grep air" while running the program? Did you verify that you can run all those commands manually? someone has reported that "airodump-ng -n" does not work in BT4. This is the very first aircrack-ng command run by wepbuster. If this feature is something that the aircrack-ng authors have removed, I will probably fix it. 
 

@@ -1,28 +1,26 @@
 There are several hints that you may consider if the program does not work for you.
 
 
-  * First of all, download the latest archive (beta-0.2) that you can find in the Downloads page. If you are one of those 3 unfortunate (eager-to-crack-their-neighbor's-ap) souls that have initially downloaded the archive, chances are, you've got the wrong archive. Changes have been made shortly after that. Download it again just to be sure or checkout the latest revision from the SVN
+  * First of all, download the latest archive (beta-0.3)  or checkout the latest revision from the SVN
 
   * Make sure the card's driver is properly loaded
 
   * Make sure no old processes of aircrack-ng and wepbuster are running (pkill -9 air && pkill -9 perl)
 
-  * You do not need to put the card in monitor mode. The program does this for you.
+  * You must not put the card in monitor mode. The program does this for you.
 
   * Upon starting the program, it should show the inject interface and monitor interface plus the mac address
-   Ex. MODE: crack         (using: wlan0/mon0 === 00:c0:ca:1a:0e:41)
+   Ex. MODE: crack         (using: wlan0/mon0 === 00:c0:ca:1a:0e:41). Verify if this is correct. Don't bother continuing otherwise.
 
-  * If for some out of this world reason, the card showing instead of the above are both the same, (wlan0/wlan0) and when you looked at "airmon-ng start wlan0" it says that "(monitor mode enabled on mon0)", you can just specify your $inject_iface and $monitor_iface as well as the $macaddress inside the script. This will save you from a lot of trouble.
-
-  * Having a different monitor interface is due to the possibility that the in-built kernel driver was used, aka mac80211.  Some wireless card drivers don't need to create a Radio tap interface, so the same interface is used for injecting and    monitoring 
-
-  * If you have set the interfaces manually and the program still did not find any AP, are you inside a writable directory? Did you manually run airodump using the $monitor_iface (with -t wep) and still there are WEP APs around? 
+  * If wireless card and mac address detection did not work for you, just specify your $inject_iface and $monitor_iface as well as the $macaddress inside the script. This will save you from a lot of trouble. Submit a new issue, mentioning the details of your setup.
+ 
+  * If you have set the interfaces manually and the program still did not find any AP, are you inside a writable directory? Did you manually run airodump-ng using the $monitor_iface (with -t wep -n) and still there are WEP APs around and airodump-ng was able to write the csv file within that $scan_duration? 
 
   * Did you change your aircrack-ng sources and recompile as according to the instructions? If using my pre-compiled aircrack-ng and airodump-ng, make sure wepbuster is executing them and not the unmodified versions. Otherwise, you might see the error: "Cannot open airodump output". Change $airodumpwait and $scan_duration accordingly if using an unmodified aircrack-ng and airodump-ng. 
 
   * What do you see when you do a "ps ax |grep perl && ps ax |grep air" while running the program? Did you verify that you can run all those commands manually? someone has reported that "airodump-ng -n" does not work in BT4. This is the very first aircrack-ng command run by wepbuster
 
-  * Don't use a live CD yet. Use a linux installation (it can be inside vmware but is better otherwise so you won't think the program runs slow) and then modify the aircrack-ng sources as mentioned in the front page. 
+  * Don't use a live CD yet. Use a linux installation (it can be inside vmware but is better otherwise so you won't think the program runs slow) and then modify the aircrack-ng sources as mentioned in the front page. If you use a live CD and you can't use a modified aircrack-ng, then you must set $airodumpwait and $scan_duration accordingly. 
 
   * Make sure to capture your terminal session so that I can review the output of the program. My regular expression skillz could slip from time to time..
 

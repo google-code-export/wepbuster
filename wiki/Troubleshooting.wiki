@@ -3,7 +3,7 @@ There are several hints that you may consider if the program does not work for y
 
   * First of all, download the latest archive (beta-0.3)  or checkout the latest revision from the SVN
 
-  * Make sure the card's driver is properly loaded
+  * Make sure the card's driver is properly and freshly loaded
 
   * Make sure no old processes of aircrack-ng and wepbuster are running (pkill -9 air && pkill -9 perl)
 

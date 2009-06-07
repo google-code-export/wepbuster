@@ -82,7 +82,7 @@ my $inject_timeout = 6;
 
 ###################  DEFAULT NON-OVERLAPPING CHANNELS SELECTION  #######################
 
-my $country = 'EU';
+my $country = 'US';
 
 
 # US = 1, 6, 11

@@ -49,11 +49,9 @@ my $scan_duration = 6;
 # Minimum number of IVs collected when we want cracking to begin (20k for 40-bit, 40k for 128-bit)
 my $min_iv = 17000;
 
-# Time to wait before reading the airodump output. 23 seconds/sleeps should be safe on default aircrack-ng installation which updates ]
+# Time to wait before reading the airodump output. 23 seconds/sleeps should be safe on default aircrack-ng installation which updates 
 # .csv files every 20 seconds;
 my $airodumpwait = 4;
-
-
 
 
 
@@ -81,13 +79,25 @@ my $arpreplay_timeout = 4;
 # After 60 sleeps if IV is less than 100, stop injecting and move to the next AP ($ivtimer / 10)
 my $inject_timeout = 6;
 
-####################################################################################
+
+###################  DEFAULT NON-OVERLAPPING CHANNELS SELECTION  #######################
+
+my $country = 'EU';
+
+
+# US = 1, 6, 11
+# EU = 1, 5, 9, 13
+
+my %default_channels;
+$default_channels{'US'} = { 1=>'', 6=>'', 11=>'' };
+$default_channels{'EU'} = { 1=>'', 5=>'', 9=>'', 13=>'' };
+
+
+#########################################################################################
 
 
 
 
-
-my @channels; 
 my $mode;
 my $pinghost;
 my %uniq_channels;
@@ -125,7 +135,7 @@ open AIRMON, "airmon-ng |" or die $!;
 while (<AIRMON>){
   next unless /^[a-z]+\d\s/;
   next if /^mon\d/;
-print "\n---------------------------------------------------\n";
+  print "\n---------------------------------------------------------\n";
   $inject_iface = (split/\s+/, $_)[0];
   print "\nFound $inject_iface...\n"; 
   print "Getting monitor interface...\n";
@@ -156,13 +166,15 @@ if ($ifacecount == 0 && $inject_iface eq ''){
   print "No working wireless card.\nExiting...\n\n";
   exit;
 }
-print "\n===================================================\n" unless $inject_iface ne '';
+print "\n========================================================\n" unless $inject_iface ne '';
 print "\nFound $ifacecount useable wireless card(s)\n" unless $ifacecount == 0; 
 print "\nSelect which one to use [1] (You HAVE $select_timeout seconds)\n" if $ifacecount > 1;
-foreach (sort keys %wifi_iface){
-	print " $_) $wifi_iface{$_}{'inject'}/$wifi_iface{$_}{'monitor'}\n";
-}
 print "\n";
+foreach (sort keys %wifi_iface){
+	print " $_) "unless $ifacecount == 1; 
+	print "$wifi_iface{$_}{'inject'}/$wifi_iface{$_}{'monitor'}\n";
+}
+print "\n=========================================================\n\n";
 
 if ($ifacecount > 1){
    $selected_iface = select_iface($select_timeout);
@@ -219,39 +231,51 @@ if (scalar @ARGV > 0 ){
       if ($ARGV[0] eq 'sort' or $ARGV[0] eq 'connect'){
 	$mode = shift @ARGV;
       }
-  
-
-}else{
+  }else{
 
 ## We use hash to store channel arguments (as hash keys) so that we won't have to scan a channel more than once in case of duplicate channel inputs
-
     foreach (@ARGV){
 	if ($_=~/^\d/){
 	    $_ =~ tr/0-9//cd;
-	   if ($_ == 1 or $_ == 6){
-		$uniq_channels{$_} = '';
-	   }else{
-	     if ($_ == 11){
-		$uniq_channels{$_} = '';
-	     }else{
-		print "\nUnknown channel $_. Using the default (1, 6, 11)\n\n";
-		}
-	   }
-	}
-    }
+            if ($country eq 'US'){
+		if (exists $default_channels{$country}{$_}){
+		      $uniq_channels{$_} = '';
+	         }else{
+#			print "$_ is not $country channel. Excluding...\n";
+		  }
+            }elsif ($country eq 'EU'){
+		if (exists $default_channels{$country}{$_}){
+		      $uniq_channels{$_} = '';
+		  }else{
+#			print "$_ is not an $country channel. Excluding...\n";
+		  }
+		  
+
+
+            }
+
+	  }
+      }
+  }
 	
- }
-  
 }
+  
 
 
 
-    ####  If there was no channel passed (MODE: crack only), defaults to all three non overlapping channels
+
+####  If there was no channel passed (MODE: crack only), defaults to all non overlapping channels on the country specified
     if (scalar keys %uniq_channels == 0){
-       %uniq_channels = (1=>'', 6=>'', 11=>'');
+	print "No valid channel entered. Using the default ( $country = ";
+	while (( my $key, my $val) = each %{$default_channels{$country}}){
+		$uniq_channels{$key} = $val;
+	}
+	foreach (sort { $a <=> $b } keys %uniq_channels){
+	  print "$_ ";
+	}
+	print ")\n\n";
      }
-
-
+    
 
 
 	if (defined $mode){
@@ -260,7 +284,7 @@ if (scalar @ARGV > 0 ){
 	if ($mode ne 'sort'){
 	   if ($mode ne 'connect'){
 		print "\nUsage: \n";
-		print "\tperl wepbuster [1 | 6 | 11] (or any combination, space separated )\n"; 
+		print "\tperl wepbuster [channel/s] (or any combination, space separated )\n"; 
 		print "\tperl wepbuster (sort | connect) [HOST | IP] 		(Defaults to: gateway)\n";
 		exit;
 	   }
@@ -274,7 +298,6 @@ if (scalar @ARGV > 0 ){
 #################   END ARGUMENT VERIFICATION ####################################
 
 
-	print "\n" unless $inject_iface ne '';
 	print "\nMODE: $mode\t(using: $inject_iface/$monitor_iface == $macaddress)\n";
 
 ### MISCELLANEOUS CHECKS
@@ -718,7 +741,7 @@ if (defined $errline){
 	while (1){
 
 
-	#  If aircrack is done cracking(when it has found the key or it hasn't and has tried 100000 IVs already) or Enter was pressed 
+	#  If aircrack is done cracking(when it has found the key or it hasn't and has tried for 15 minutes already) or Enter was pressed 
 	if ($cracking eq 'done' || ReadKey (-1) || $timeout == 1){
 	  print "Stopping all forks...\n\n";
 	  kill (9, $airodump_pid);

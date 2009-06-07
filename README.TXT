@@ -30,16 +30,17 @@
 #										 #
 #  USAGE:				        				 #
 #									         #
-#  perl wepbuster [1 | 6 | 11] (or any combination, space separated )\n"; 	 #
+#  perl wepbuster [channel/s] (or any combination, space separated )\n"; 	 #
 #  perl wepbuster (sort | connect) [HOST | IP]  (Defaults to: gateway)\n";     	 #
 #										 #
 #										 #
 #  Typically, one would invoke the program without any arguments. Doing this	 #
 #  will set the mode to 'crack' and will try to crack all wep-enabled access     #
-#  points within the range on each of those 3 non-overlapping channels (1, 3, 6) #
+#  points within the range on each of those non-overlapping channels depending   #
+#  on which country was specified (1, 6, 11 for US) and (1, 5, 9, 13 for EU)     #
 #										 #
-#  Given an argument of numbers (1, 6, or 11 only), mode will be set to 'crack'  #
-#  and will crack all APs on that particular channel/s specified.		 #
+#  Given an argument of numbers, mode will be set to 'crack' and will crack all  #
+#  APs on those particular channel/s specified.		 			 #
 #										 #
 #  If passed with a 'sort' argument, followed by an optional IP address or a     #
 #  hostname, the program will try to sort the list of cracked access points 	 #
@@ -136,7 +137,8 @@
 #										 #
 #  LINKS									 #
 #   										 #
-#  wepbuster is in YouTube!! Go there and search for "wepbuster" 		 #
+#  Project Page: http://code.google.com/p/wepbuster 		 		 #
+#  Demo Videos: http://www.youtube.com/user/wif1bust3r				 #
 #										 #
 ##################################################################################
 
@@ -160,7 +162,6 @@ source code.
  - Can accept either combination of 1, 6, 11 for US non-overlapping channels and
    1, 5, 9, 13 for EU non-overlapping channels
  - If no valid channels were entered, defaults to all channels on the $country specified
-   US = 1, 6, 11   EU = 1, 5, 9, 13
 
 4. Verify existence of cracked APs list ("owned.txt") before running 'sort' or 'connect' mode.
 

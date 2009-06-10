@@ -30,8 +30,8 @@
 #										 #
 #  USAGE:				        				 #
 #									         #
-#  perl wepbuster [channel/s] (or any combination, space separated )\n"; 	 #
-#  perl wepbuster (sort | connect) [HOST | IP]  (Defaults to: gateway)\n";     	 #
+#  perl wepbuster [channel/s] (or any combination, space separated )\n" 	 #
+#  perl wepbuster (sort | connect) [HOST | IP]  (Defaults to: gateway)\n"     	 #
 #										 #
 #										 #
 #  Typically, one would invoke the program without any arguments. Doing this	 #
@@ -158,7 +158,7 @@ source code.
 2. Obtain the macaddress by parsing ifconfig(8) output
 
 3. Argument verification:
- - Can accept 'sort' and 'connect' followed by an optional IP address or a hostname;
+ - Can accept 'sort' and 'connect' followed by an optional IP address or a hostname
  - Can accept either combination of 1, 6, 11 for US non-overlapping channels and
    1, 5, 9, 13 for EU non-overlapping channels
  - If no valid channels were entered, defaults to all channels on the $country specified
@@ -169,7 +169,7 @@ source code.
    an overall list of wep-enabled access points including all the clients currently 
    associated to each.
 
-   `airodump-ng monitor_interface -t wep -c  channel -n -w $filename 2>&1`;
+   `airodump-ng monitor_interface -t wep -c  channel -n -w $filename 2>&1`
 
 
 6. Verify that at least one access point was found during the initial scan, before 
@@ -195,12 +195,12 @@ source code.
   - REVEAL HIDDEN SSID
     - Send deauth broadcast for 3 times. 
 
-      `aireplay-ng -0 1 -a bssid inject_interface -h mac_address 2>&1`;
+      `aireplay-ng -0 1 -a bssid inject_interface -h mac_address 2>&1`
 
      If there's any associated clients found in the initial scan, send each client directed 
      deauth plus 2 deauth broadcast only. 
 
-       `aireplay-ng -0 1 -a bssid inject_interface -h mac_address -c client_macaddress 2>&1`;
+       `aireplay-ng -0 1 -a bssid inject_interface -h mac_address -c client_macaddress 2>&1`
 
      User can press 'enter' key to send two more deauth broadcasts.
 
@@ -244,7 +244,7 @@ source code.
    - if still injecting after 30 minutes worth of sleeps, try to send reassociate 
      request once (in case when we are injecting to an AP that has suddenly rebooted)
 
-	aireplay-ng -1 1 -a bssid inject_interface -e 'ssid' -h mac_address`;
+	aireplay-ng -1 1 -a bssid inject_interface -e 'ssid' -h mac_address`
 
    - after 1 hour worth of sleeps, and we're still injecting, skip the AP.
   - BEGIN CRACKING THE KEY
@@ -268,7 +268,7 @@ source code.
    - Once we have all the RTT for each AP, sort them and write the output into
      "owned_rtt.txt"
    - Finally, rearrange "owned.txt" such that the order of the APs follows that of the
-      "owned_rtt.txt";
+      "owned_rtt.txt"
 
 
  10.3 MODE 'CONNECT'

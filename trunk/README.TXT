@@ -55,16 +55,18 @@
 #  										 #
 #										 # 
 #										 #
-#  RECOMMENDED MODIFICATIONS:							 #
+#  REQUIRED MODIFICATIONS:							 #
 #										 #
-#  The following modifications to the source and header file of the two	       	 #
-#  aircrack-ng utilities (aircrack-ng, airodump-ng), are not required but will   #
-#  make the decryption of WEP key more accurate (in terms of number of IVs       #
-#  needed in order to obtain the key.						 #
+#  Starting with beta_0.4, the first two modifications to the source and header  #
+#  file of the two aircrack-ng utilities (aircrack-ng, airodump-ng), are not     #
+#  required. Those modifications will just make the decryption of WEP key more   # 
+#  accurate (in terms of number of IVs needed in order to obtain the key.        #
+#  The third one however, is needed in order for fragmentation attack to work    #
 #										 #
 #										 #
-#  1.) Instead of 5000, change PTW_TRY_STEP to 100 to make cracking more	 # 
-#    accurate (in terms of number of IVs needed to crack the key)		 #
+#  1.) Instead of 5000, change PTW_TRY_STEP to 100 to tell aircrack-ng to start  #
+#    cracking the WEP key again (from a previous failed attempt) as soon as it   #
+#    has collected 100 new IVs.							 #
 #										 #
 #    Look for this line below in "aircrack-ng.h" 				 #
 #    PTW_TRY_STEP  #5000   							 #
@@ -79,6 +81,31 @@
 #										 #
 #    Look for this line below in "airodump-ng.c"				 #
 #    if( time( NULL ) - tt1 >= 20)  						 #
+#										 #
+#										 #
+#   3.) When IVs did not go beyond 300 after 40 sleeps, wepbuster will try       #
+#     aireplay-ng's fragmentation attack (-5). By default, this attack is inter- #
+#     active, meaning, aireplay-ng will not try a data packet until you say yes  #
+#     or no. In order for wepbuster to try all data packets collected so far,    #
+#     the following lines in aireplay-ng's source must be changed:		 #
+#										 #
+#     Look for these lines in "aireplay-ng.c" and comment the two as show below: #
+#										 #
+#     printf( "\n\nUse this packet ? " );					 #
+#     ....									 #
+#     ....									 #
+#     // while(!ret) ret = scanf( "%s", tmpbuf );				 #
+#     ....									 #
+#     // if( tmpbuf[0] == 'y' || tmpbuf[0] == 'Y' )				 #
+#										 #
+#										 #
+#     Also, to shorten the amount of tries when there is no answer from the AP,  #
+#     change "round > 10" to "round > 2"					 #
+#										 #
+#     PCT; printf("No answer, repeating...\n");					 #
+#     ....									 #
+#     ....									 #
+#     if (round > 10)								 #
 #										 #
 #										 #
 #  REQUIRED PERL MODULES:							 #
@@ -217,10 +244,9 @@ source code.
     - If AP is filtered, check if we have any associated client to spoof our mac 
       address with.
     - If there is, spoof our mac using "macchanger", otherwise, skip the AP. 
-  - Run fakeauth with keep-alives in the background
+  - Run fakeauth with keep-alives (reassociate every 15 minutes)  in the background
 
-	
-	'aireplay-ng -1 6000 -o 1 -q 10 -a bssid inject_interface -e 'ssid' -h mac_address' 
+	'aireplay-ng -1 900 -o 1 -q 10 -a bssid inject_interface -e 'ssid' -h mac_address' 
 
   - Run airodump in the background and dump only data destined to the AP
 
@@ -231,22 +257,35 @@ source code.
      'aireplay-ng inject_interface -3  -b bssid -h mac_address 2>&1'
 
   - KEEP COUNTING IVs EVERY 2 SLEEPS AND DISPLAY THE COUNT EVERY 10 SLEEPS
-   - if IV count is less than 100 after 20 sleeps, send deauth broadcast twice with 
+   - if IV count is less than 100 after 10 sleeps, send deauth broadcast twice with 
      2 sleeps interval
 
 	 'aireplay-ng -0 1 -a bssid inject_interface -h mac_address'
 
-   - if IV count is less than 100 after 40 sleeps, try rebroadcast attack (-p 0841)
+   - if IV count is less than 300 after 40 sleeps, try fragmentation attack (-5) for $frag_timeout seconds (unless there is no at all IV) 
+     Note that we're only reading a copy of the collected dump so far.  
+
+	'aireplay-ng -5 inject_interface -b bssid -r inject_dump-01.cap.tmp -h mac_address'
+
+   - if attack was successful, we build an arp packet using the keystream found
+
+        'packetforge-ng -0 -a bssid -h mac_address -k 255.255.255.255 -l 255.255.255.255 -y keystream_xor -w forged_arp.cap'
+   
+   - then we replay it for 3 seconds. (we already have an aireplay-ng -3 running so we only need this one until the first 
+     aireplay-ng -3 picks up our forged arp.
+        
+	'aireplay-ng inject_interface -3 -r forged_arp.cap -b bssid -h mac_address 2>&1'
+
+   - when fragmentation exits, either because it has ran out of data or it has timed out, we launch rebroadcast attack (-p 0841) 
 
          'aireplay-ng inject_interface -2 -p 0841 -b bssid -c FF:FF:FF:FF:FF:FF -h mac_address  2>&1'
 
-   - if IV count is less than 100 after 60 sleeps, skip the AP
-   - if still injecting after 30 minutes worth of sleeps, try to send reassociate 
-     request once (in case when we are injecting to an AP that has suddenly rebooted)
 
-	aireplay-ng -1 1 -a bssid inject_interface -e 'ssid' -h mac_address`
+   - 20 sleeps after we have tried rebroadcast and IV count did not increase more than 10, we'll try to send INT to rebroadcast proces
+     so it will try the next data packet.
 
-   - after 1 hour worth of sleeps, and we're still injecting, skip the AP.
+   - after 20 minutes and we're still trying... This is taking forever, we'll skip the ap
+
   - BEGIN CRACKING THE KEY
    - if we have collected $min_iv (17000) start cracking the key using aircrack-ng.
 

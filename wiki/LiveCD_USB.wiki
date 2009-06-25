@@ -18,7 +18,7 @@ a working wepbuster: (SliTaz/Aircrack-ng can be downloaded from http://www.aircr
 
 ==Other Programs==
 
-Aside from aircrack-ng programs, make sure wepbuster can run these programs to avoid any errors:
+Aside from aircrack-ng programs, make sure wepbuster can run these programs to avoid seeing any errors that could sometimes stop wepbuster:
 
   * iwconfig
   * ifconfig

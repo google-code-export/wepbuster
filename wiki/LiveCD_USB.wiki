@@ -28,3 +28,11 @@ Aside from aircrack-ng programs, make sure wepbuster can run these programs to a
   * route add/delete
   * stty
   * macchanger
+
+==Modifying Live Distro Filesystem==
+
+So you've decided to get down and dirty with your favorite Live Distro. Here are some generic tips for modifying
+the filesystem.
+
+  * If you want to add the drivers for your wireless cards, as advised by some folks at aircrack-ng.org, you might want to use the same compiler used in compiling the kernel of the live distro for building your wireless card drivers.
+

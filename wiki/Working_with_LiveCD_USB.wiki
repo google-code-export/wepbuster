@@ -1,0 +1,14 @@
+=Working with Live Distros=
+
+Live CDs and bootable USB drives are convinient to use. Wouldn't it be nice if you could put
+wepbuster on your favorite live distro and carry it wherever you go? It's not really that difficult.
+Here are some hints I have collected when I modified SliTaz/Aircrack-ng liveCD to include
+wepbuster: (SliTaz/Aircrack-ng can be downloaded from http://www.aircrack-ng.org)
+
+  1. Make sure standard perl libraries are installed. SliTaz doesn't have those so I had to copy them from another perl installation. Those libraries/modules should go anywhere within the output of running perl -e 'print @INC'
+
+  2 The perl included in SliTaz does not support threading. I had to recompile perl and enable threading. See INSTALL inside perl source tarball for details on how to enable it.
+
+  3.
+
+===to be continued...===

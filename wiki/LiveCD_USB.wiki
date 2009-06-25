@@ -36,7 +36,7 @@ the filesystem.
 
   * If you want to add the drivers for your wireless cards, as advised by some folks at aircrack-ng.org, you might want to use the same compiler used in compiling the kernel of the live distro for building your wireless card drivers.
 
-  * Finally, refer to your live distro documentation on how to actually modify the filesystem. In my case here's the summary of commands I used to modify SliTaz/Aircrack-ng:
+  * Refer to your live distro documentation on how to actually modify the filesystem. In my case here's the summary of commands I used to modify SliTaz/Aircrack-ng:
 
 
 1. Create the temporary directories:
@@ -73,5 +73,3 @@ rm rootfs.gz
 genisoimage -R -o slitaz_wepbuster.iso -b boot/isolinux/isolinux.bin -c boot/isolinux/boot.cat 
 -no-emul-boot -boot-load-size 4 -V "SliTaz-WEPBuster" -input-charset iso8859-1 -boot-info-table rootcd
 }}}
-
-

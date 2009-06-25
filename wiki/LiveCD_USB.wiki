@@ -31,8 +31,47 @@ Aside from aircrack-ng programs, make sure wepbuster can run these programs to a
 
 ==Modifying Live Distro Filesystem==
 
-So you've decided to get down and dirty with your favorite Live Distro. Here are some generic tips for modifying
+So you've decided to get down and dirty with your favorite Live Distro. Here are some tips for modifying
 the filesystem.
 
   * If you want to add the drivers for your wireless cards, as advised by some folks at aircrack-ng.org, you might want to use the same compiler used in compiling the kernel of the live distro for building your wireless card drivers.
+
+  * Finally, refer to your live distro documentation on how to actually modify the filesystem. In my case here's the summary of commands I used to modify SliTaz/Aircrack-ng:
+
+
+1. Create the temporary directories:
+{{{
+mkdir -p /home/slitaz/wepbuster
+mkdir -p /home/slitaz/src
+cd /home/slitaz/wepbuster
+}}}
+2. Mount the ISO image
+{{{
+mkdir /tmp/loop
+mount -o loop slitaz_image.iso /tmp/loop
+}}}
+3. Copy rootcd contents
+{{{
+mkdir rootcd
+cp -a /tmp/loop/* rootcd
+umount /tmp/loop
+}}}
+4. Extract the compressed filesystem (this is what you really need in order to modify the live distro)
+{{{
+mkdir rootfs
+cp rootcd/boot/rootfs.gz rootfs
+cd rootfs
+mv rootfs.gz rootfs.lzma
+lzma -d rootfs.lzma -c | cpio -id
+rm rootfs.lzma
+}}}
+5. Finally, explore the contents of rootfs, modify the contents and when you're done, compress it again and generate a new ISO image:
+{{{
+find . -print |cpio -o -H newc |gzip -9 > ../rootfs.gz
+cd ..
+rm rootfs.gz
+genisoimage -R -o slitaz_wepbuster.iso -b boot/isolinux/isolinux.bin -c boot/isolinux/boot.cat 
+-no-emul-boot -boot-load-size 4 -V "SliTaz-WEPBuster" -input-charset iso8859-1 -boot-info-table rootcd
+}}}
+
 

@@ -14,8 +14,7 @@ a working wepbuster: (SliTaz/Aircrack-ng can be downloaded from http://www.aircr
 
 ==Aircrack-ng==
 
-  * Though webuster might be able to do simple wep cracking task, it may not be useful in every situation. Your best weapon as always is the command line, running aircrack-ng programs manually. For this reason, you might want 
-to keep copies of original aircrack-ng programs somewhere instead of just overwriting them with modified versions. Just make sure wepbuster is calling the modified versions. 
+  * Though webuster might be able to do simple wep cracking task, it may not be useful in every situation. Your best weapon as always is the command line, running aircrack-ng programs manually. For this reason, you might want to keep copies of original aircrack-ng programs somewhere instead of just overwriting them with modified versions. Just make sure wepbuster is calling the modified versions. 
 
 ==Other Programs==
 

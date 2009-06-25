@@ -1,8 +1,9 @@
 =Working with Live Distros=
 
+
 Live CDs and bootable USB drives are convinient to use. Wouldn't it be nice if you could put
 wepbuster on your favorite live distro and carry it wherever you go? It's not really that difficult.
-Here are some hints I have collected when I modified SliTaz/Aircrack-ng liveCD to include
+Here are some hints I have collected when I modified SliTaz/Aircrack-ng to include
 a working wepbuster: (SliTaz/Aircrack-ng can be downloaded from http://www.aircrack-ng.org)
 
 ==Perl==
@@ -16,6 +17,18 @@ a working wepbuster: (SliTaz/Aircrack-ng can be downloaded from http://www.aircr
   * Though webuster might be able to do simple wep cracking task, it may not be useful in every situation. Your best weapon as always is the command line, running aircrack-ng programs manually. For this reason, you might want 
 to keep copies of original aircrack-ng programs somewhere instead of just overwriting them with modified versions. Just make sure wepbuster is calling the modified versions. 
 
+==Other Programs==
+
+Aside from aircrack-ng programs, make sure wepbuster can run these programs to avoid any errors:
+
+  * iwconfig
+  * ifconfig
+  * pkill
+  * dhclient
+  * ping
+  * route add/delete
+  * stty
+  * macchanger
 
 
 ===currently being updated...===

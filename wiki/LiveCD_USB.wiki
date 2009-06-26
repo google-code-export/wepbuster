@@ -30,6 +30,7 @@ Aside from aircrack-ng programs, make sure wepbuster can run these programs to a
   * macchanger
   * touch
   * mv
+  * cp
   * rm
   * netstat
 

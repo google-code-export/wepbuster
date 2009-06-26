@@ -28,6 +28,8 @@ Aside from aircrack-ng programs, make sure wepbuster can run these programs to a
   * route add/delete
   * stty
   * macchanger
+  * touch
+  * mv
 
 ==Modifying Live Distro Filesystem==
 

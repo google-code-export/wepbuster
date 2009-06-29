@@ -399,7 +399,7 @@ chomp ($airodump, $aireplay, $aircrack);
 		$_ =~ s/\s+//g;
 	        $_ =~ tr/a-z/A-Z/;
 		if ($_ !~ /^00:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$/){
-		   print "<< DEBUG >>: $_ not a valid mac format. It should be \"00:xx:xx:xx:xx:xx\" (x = hex). Skipping...\n" if $debug;
+		   print "<< DEBUG >>: $_ NOT A VALID MAC FORMAT. IT SHOULD BE \"00:xx:xx:xx:xx:xx\" (x = hex). SKIPPING...\n" if $debug;
 		   next;
 		} 
 		$bad_ap{$_} = '';
@@ -417,7 +417,7 @@ chomp ($airodump, $aireplay, $aircrack);
 			$_ =~ s/\s+//g;
 			$_ =~ tr/a-z/A-Z/;
 			if ($_ !~ /^00:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$/){
-			   print "<< DEBUG >>: $_ not a valid mac format. It should be \"00:xx:xx:xx:xx:xx\" (x = hex). Skipping...\n" if $debug;
+			   print "<< DEBUG >>: $_ NOT A VALID MAC FORMAT. IT SHOULD BE \"00:xx:xx:xx:xx:xx\" (x = hex). SKIPPING...\n" if $debug;
 			   next;
 			} 
 

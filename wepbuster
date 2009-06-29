@@ -30,7 +30,7 @@ use subs qw(clean connect pingtest select_iface);
 
 
 # Set 1 to enable debugging: 
-my $debug = 0;
+my $debug = 1;
 
 
 
@@ -395,9 +395,10 @@ chomp ($airodump, $aireplay, $aircrack);
 	    open BADAP, "bad_ap.txt" or die "Can\'t open bad_ap.txt!: $!\n\n";
 	    while (<BADAP>){
 		chomp;
-		$_ =~ s/^\s*$//;
+		next if /^\s+$/;
+		$_ =~ s/\s+//g;
 	        $_ =~ tr/a-z/A-Z/;
-		if ($_ !~ /00:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}/){
+		if ($_ !~ /^00:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$/){
 		   print "$_ not a valid mac format. It should be \"00:xx:xx:xx:xx:xx\" (x = hex). Skipping...\n";
 		   next;
 		} 
@@ -412,9 +413,10 @@ chomp ($airodump, $aireplay, $aircrack);
 		open KNOWNAP, "known_ap.txt" or die "Can\'t open known_ap.txt!: $!\n\n";
 		while (<KNOWNAP>){
 			chomp;
-			$_ =~ s/^\s*$//;
+			next if /^\s+$/;
+			$_ =~ s/\s+//g;
 			$_ =~ tr/a-z/A-Z/;
-			if ($_ !~ /00:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}/){
+			if ($_ !~ /^00:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}$/){
 			   print "$_ not a valid mac format. It should be \"00:xx:xx:xx:xx:xx\" (x = hex). Skipping...\n";
 			   next;
 			} 

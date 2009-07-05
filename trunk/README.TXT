@@ -2,7 +2,7 @@
 ##################################################################################
 #					        			 	 #
 #  					        				 # 
-#  			WEPBuster 1.0                				 #
+#	  			WEPBuster 1.0            			 #
 #					        				 #
 #					        				 #
 #  Author: Mark Jayson Alvarez	                				 #
@@ -20,7 +20,9 @@
 #  http://www.aircrack-ng.org 							 #
 #									         #
 #   									       	 #
-#  OUTPUT: (owned.txt)								 #
+#  OUTPUT: 									 #
+#										 #	
+#   (owned.txt)								 	 #
 #										 #
 #      BSSID           CHANNEL  SSID	       KEY	      TIMESTAMP	 	 #
 #  										 #
@@ -28,10 +30,26 @@
 #  00:12:29:1D:E1:B3 === 1 === amnah === 68:28:1a:3c:20 === 1243883642           #
 #										 #
 #										 #
+#   (owned_rtt.txt)								 #
+#										 #
+#   BSSID      CHANNEL       SSID   KEY   TIMESTAMP    AVERAGE RTT (PACKET LOSS) #
+#										 #
+# 00:21:29:7D:5E:EB === 11 === ap1 === 08:6D:38:15:30 === 183642 === 7.2(0% loss)#
+# 00:12:29:1D:E1:B3 === 1 === ap2 === 68:28:1a:3c:20 === 124642 === 9.3(10% loss)#
+#										 #
+#										 #
+#   (found_ap.txt)								 #
+#										 #
+#   BSSID	CHANNEL		SSID						 #
+#										 #
+#  00:21:29:7D:5E:EB    11     Zakhal 						 #
+#  00:12:29:1D:E1:B3     1     amnah 						 #
+#										 #
+#										 #
 #  USAGE:				        				 #
 #									         #
-#  perl wepbuster [channel/s] (or any combination, space separated )\n" 	 #
-#  perl wepbuster (sort | connect) [HOST | IP]  (Defaults to: gateway)\n"     	 #
+#  perl wepbuster [channel/s] (or any combination, space separated )" 	 	 #
+#  perl wepbuster (sort | connect) [HOST | IP]  (Defaults to: gateway)"     	 #
 #										 #
 #										 #
 #  Typically, one would invoke the program without any arguments. Doing this	 #
@@ -55,14 +73,14 @@
 #  										 #
 #										 # 
 #										 #
-#  REQUIRED MODIFICATIONS:							 #
+#  RECOMMENDED MODIFICATIONS (OPTIONAL):					 #
 #										 #
-#  Starting with beta_0.4, the first two modifications to the source and header  #
-#  file of the two aircrack-ng utilities (aircrack-ng, airodump-ng), are not     #
-#  required. Those modifications will just make the decryption of WEP key more   # 
-#  accurate (in terms of number of IVs needed in order to obtain the key.        #
-#  The third one however, is needed in order for fragmentation attack to work    #
-#										 #
+#  Starting with 1.0 beta_0.6, wepbuster now works with the vanilla aircrack-ng  #
+#  releases (aircrack-ng 1.0 rc4 and above). The first modification to the  	 #
+#  source code of aircrack-ng will increase the accuracy in terms of   		 # 
+#  the number of IVs needed in order to crack the WEP key. The second one will   #
+#  shorten the amount of time aireplay-ng will wait before trying a new data     #
+#  packet for fragmentation attack.						 #
 #										 #
 #  1.) Instead of 5000, change PTW_TRY_STEP to 100 to tell aircrack-ng to start  #
 #    cracking the WEP key again (from a previous failed attempt) as soon as it   #
@@ -72,34 +90,11 @@
 #    PTW_TRY_STEP  #5000   							 #
 #										 #
 #										 #
-#  2.) The script relies heavily on reading and parsing the .csv file output of  #
-#    airodump-ng. As such, instead of airodump-ng waiting for 20 seconds before  #
-#    writing the .csv text output, it is recommended that you make it 2 seconds. #
-#    If not changing this line below, you should set $airodumpwait and $scan_dur #
-#    ration to at least more than 20 to avoid getting errors. A value of 23      #
-#    should be safe.	 							 #
-#										 #
-#    Look for this line below in "airodump-ng.c"				 #
-#    if( time( NULL ) - tt1 >= 20)  						 #
+#   2.) When IVs did not go beyond 300 after 30 sleeps, wepbuster will try       #
+#     aireplay-ng's fragmentation attack (-5).					 # 
 #										 #
 #										 #
-#   3.) When IVs did not go beyond 300 after 40 sleeps, wepbuster will try       #
-#     aireplay-ng's fragmentation attack (-5). By default, this attack is inter- #
-#     active, meaning, aireplay-ng will not try a data packet until you say yes  #
-#     or no. In order for wepbuster to try all data packets collected so far,    #
-#     the following lines in aireplay-ng's source must be changed:		 #
-#										 #
-#     Look for these lines in "aireplay-ng.c" and comment the two as show below: #
-#										 #
-#     printf( "\n\nUse this packet ? " );					 #
-#     ....									 #
-#     ....									 #
-#     // while(!ret) ret = scanf( "%s", tmpbuf );				 #
-#     ....									 #
-#     // if( tmpbuf[0] == 'y' || tmpbuf[0] == 'Y' )				 #
-#										 #
-#										 #
-#     Also, to shorten the amount of tries when there is no answer from the AP,  #
+#     To shorten the amount of tries when there is no answer from the AP,  	 #
 #     change "round > 10" to "round > 2"					 #
 #										 #
 #     PCT; printf("No answer, repeating...\n");					 #
@@ -107,29 +102,28 @@
 #     ....									 #
 #     if (round > 10)								 #
 #										 #
-#										 #
-#  REQUIRED PERL MODULES:							 #
-#										 #
-#  The only module used in this script is the module "Term::ReadKey". This 	 #
-#  module is used when when the 'Enter' key is pressed, e.g, if the user wants   #
-#  to skip injecting into a particular Access Point. This module can be		 # 
-#  obtained from "http://search.cpan.org".					 #
-#										 #
-#  A typical installation procedure of any perl module consists of the follo-    #
-#  wing steps:									 #
-#  										 #
-#  perl Makefile.PL								 #
-#  make										 #
-#  make install									 #
-#   										 #
-#  On Debian systems, this can be installed using apt-get			 #
-#  e.g, "apt-get install libterm-readkey-perl"					 #
+#   In most occassions, fragmentation attack results in a very quick creation    #
+#   of forged arp packets that can be used for arp replay attack which is a      #
+#   fast way to generate unique IVs for the quickest WEP cracking technique so 	 #
+#   far, the PTW attack. Changing the value above will further increase the      # 
+#   speed of fragmentation attack.						 #
 #										 #
 #										 #
-#  REQUIRED APPLICATION								 #
+#										 #
+#  REQUIREMENTS:								 #
+#										 #
+#  - aircrack-ng 1.0 rc4 and above 						 #
+#										 #
+#  - perl installation with standard libraries (threading support)  	 	 #
+#     - perl modules (http://search.cpan.org)			 		 #
+#        - Term::ReadKey							 #
+#        - Expect.pm 								 #
+#										 #
 #  - macchanger	 (www.alobbs.com/macchanger)					 #
-#     This tool is used for spoofing the mac address when the AP is using	 #
-#     mac address filtering							 #
+#										 #
+#  - miscellaneous unix programs						 #
+#	- ifconfig, iwconfig, rm, pkill, stty, cp, touch, mv, route, ping, 	 #
+#         dhclient, netstat							 #
 #										 #
 #										 #
 #										 #
@@ -166,7 +160,7 @@
 #   										 #
 #  Project Page: http://code.google.com/p/wepbuster 		 		 #
 #  Demo Videos: http://www.youtube.com/user/wif1bust3r				 #
-#										 #
+# 										 #
 ##################################################################################
 
 
@@ -250,19 +244,19 @@ source code.
 
   - Run airodump in the background and dump only data destined to the AP
 
-     'airodump-ng monitor_interface -t wep -u 20 -d bssid -c channel -w inject_dump  2>&1'
+     'airodump-ng monitor_interface -t wep -u 20 -d bssid -c channel --output-format pcap,csv -w inject_dump  2>&1'
 
   - Run arp replay attack in the background
 
      'aireplay-ng inject_interface -3  -b bssid -h mac_address 2>&1'
 
-  - KEEP COUNTING IVs EVERY 2 SLEEPS AND DISPLAY THE COUNT EVERY 10 SLEEPS
+  - KEEP COUNTING IVs EVERY 1 SLEEP AND DISPLAY THE COUNT EVERY 5 SLEEPS
    - if IV count is less than 100 after 10 sleeps, send deauth broadcast twice with 
      2 sleeps interval
 
 	 'aireplay-ng -0 1 -a bssid inject_interface -h mac_address'
 
-   - if IV count is less than 300 after 40 sleeps, try fragmentation attack (-5) for $frag_timeout seconds (unless there is no at all IV) 
+   - if IV count is less than 300 after 30 sleeps, try fragmentation attack (-5) for $frag_timeout seconds (unless there is no at all IV) 
      Note that we're only reading a copy of the collected dump so far.  
 
 	'aireplay-ng -5 inject_interface -b bssid -r inject_dump-01.cap.tmp -h mac_address'
@@ -279,10 +273,6 @@ source code.
    - when fragmentation exits, either because it has ran out of data or it has timed out, we launch rebroadcast attack (-p 0841) 
 
          'aireplay-ng inject_interface -2 -p 0841 -b bssid -c FF:FF:FF:FF:FF:FF -h mac_address  2>&1'
-
-
-   - 20 sleeps after we have tried rebroadcast and IV count did not increase more than 10, we'll try to send INT to rebroadcast proces
-     so it will try the next data packet.
 
    - after 20 minutes and we're still trying... This is taking forever, we'll skip the ap
 
@@ -301,7 +291,7 @@ source code.
    - Verify if the AP is included in the list of owned APs. If it is not, we cannot 
      connect to it because we don't have the key, therefore, we won't be able to get 
      the RTT. So we'll skip it.
-   - If we have the key, will get the RTT and record it. The RTT refers to our gateway 
+   - If we have the key, will get the RTT w/packet loss and record it. The RTT refers to our gateway 
      RTT or if we have specified a host, we'll get the ping RTT of that instead. e.g,
      "perl wepbuster sort www.google.com"
    - Once we have all the RTT for each AP, sort them and write the output into

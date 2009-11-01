@@ -608,8 +608,7 @@ print "<< DEBUG >>: RUNNING \"rm chan* inject* replay* deauth* fragment* forged*
 	### Existing keys can be replaced if 15 days have passed since the date the key was cracked.
 	### If ran in less than 15 days, existing entries will be skipped
 
-	#if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} && (time  - $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) < 1296000) {
-	if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} ) {
+	if (exists $owned_ap{$all_ap{$all_ap_key}->{'bssid'}} && (time  - $owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}) < 1296000) {
 	   print "########################################################\n\n" if $debug;
 	   print "<< DEBUG >>: $all_ap{$all_ap_key}->{'bssid'} OWNED JUST RECENTLY \(", scalar localtime($owned_ap{$all_ap{$all_ap_key}->{'bssid'}}->{'dateowned'}),"\).\nSKIPPING...\n\n" if $debug;
 	   print "########################################################\n" if $debug;

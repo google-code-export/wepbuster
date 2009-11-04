@@ -147,13 +147,11 @@ GetOptions (
              "charset=s{,}" => \@charset,
  	     "uniq" => \$uniq, 
 	     "filter:s{,}" => \%filters,
-	     "merge=s{2,}" => \%merge,
+	     "merge=s{,}" => \%merge,
              "help|?" => \$help, man => \$man) or pod2usage(1); 
 
 pod2usage(1) if $help;
 pod2usage(-exitstatus => 0, -verbose=> 2) if $man;
-
-
 
 
 ### Expand the character set ranges
@@ -245,6 +243,7 @@ undef (%tempset);
 ### Set the length to number of characters if it's not given.
 
 $pwlen =~ s/-/../g;
+
 if ($pwlen == 0){
  $pwlen = @set;
  $fastpermute = 1;
@@ -2098,7 +2097,6 @@ sub permute_uniq{
 
 
 sub filtered{
-
 my ($word, $filters) = @_;
 my @subset;
 
@@ -2115,7 +2113,9 @@ if (exists $$filters{source}){
   	     foreach (substr( $word, $i, $$filters{count})){
 		$subpattern = $subpattern . $_;
 	     }
-	     return 1 if $pattern =~ /$subpattern/;
+	     if ($pattern =~ /$subpattern/m){
+		return 1;
+	     }
 	     $subpattern = '';
 		
 	  }
@@ -2135,7 +2135,7 @@ if (exists $$filters{source}){
   	     foreach (substr( $word, $i, $$filters{count})){
 		$subpattern = $subpattern . $_;
 	     }
-	     return 1 if $pattern =~ /$subpattern/;
+	     return 1 if $pattern =~ /$subpattern/m;
 	     $subpattern = '';
 		
 	  }

@@ -2002,17 +2002,26 @@ sub wordlistgen{
 
 
 if (defined $filters{input} && $filters{input} ne ''){
- if (-e $filters{input}){
+ if (-e $filters{input} && $filters{input} ne 'STDIN'){
    open FILTER, $filters{input} or die $!;
    while (<FILTER>){
      chomp;
      print "$_\n" unless filtered($_, \%filters);
    }
-   exit;
+   exit(0);
+
+ }elsif($filters{input} eq 'STDIN'){
+    while (<STDIN>) {
+      chomp;
+      print "$_\n" unless filtered($_, \%filters);
+    }
+    exit(0);
+
  }else{
-	print "Input file missing.\n";
+	print "At least input file must exist.\n";
  }
 }
+
 
 
 if (defined $merge{input} && $merge{input} gt ''){
@@ -2032,11 +2041,23 @@ my ($input, $source, $mergedword);
       }else{
 	$input = $merge{input};
         open SOURCE, $merge{source} or die "At least source file must exist.\n$!";
-        while ($source=<SOURCE>){
-	 chomp $source;
-	 $mergedword = "$input$source"; 
- 	 print "$mergedword\n" unless filtered($mergedword, \%filters);
-        } 
+
+        if ($input eq 'STDIN'){
+	  while (my $sinput = <STDIN>){
+	     chomp $sinput;
+	     while (my $source = <SOURCE>){
+	       chomp $source; 
+	       $mergedword = "$sinput$source"; 
+ 	       print "$mergedword\n" unless filtered($mergedword, \%filters);
+             }
+	  }
+        }else{
+          while ($source=<SOURCE>){
+	     chomp $source;
+	     $mergedword = "$input$source"; 
+ 	     print "$mergedword\n" unless filtered($mergedword, \%filters);
+          } 
+        }
 
       }
   }else{
@@ -2045,7 +2066,6 @@ my ($input, $source, $mergedword);
   }
 exit(0);
 }
-
 
 
 
@@ -2304,9 +2324,9 @@ Merges each line of two files together.
 
 =over 5
 
-=item input=file|string
+=item input=file|string|"STDIN"
 
-Where source file will be merged into. If file does not exist, string is used.
+Where source file will be merged into. If file does not exist, string or standard input (unix pipe) is used.
 
 =item source=file
 
@@ -2431,9 +2451,9 @@ This filter is used in conjuction with the source file filter. When this is spec
 Suppose I want to generate four-character lower case wordlist but I want to make sure that if a word contains three consecutive consonants, the word will be accepted only if those consecutive consonants are found in the dictionary, e.g., /usr/share/dict/words. This could significantly shrink the size of my resulting word list. The first step is to generate all three possible consonants combinations and use the dictionary as a source filter  - "wepbuster permute -c lower -l 3 -f vowel -f source=/usr/share/dict/words > avoidedtrio.txt". The resulting list contains three-consonant words which are not contained in the dictionary. I will then use this list to filter out the four-character combination word list which I'm going to create - "wepbuster permute -c lower -l 4 -f source=avoidedtrio.txt -f count=3".
 
 
-=item input=file
+=item input=file|"STDIN"
 
-When this option is specified, the script will read the file or wordlist line by line and filter out those lines according to whatever filters were specified.
+When this option is specified, the script will read the file or standard input (unix pipe) line by line and filter out those lines according to whatever filters were specified.
 
 =back
 
